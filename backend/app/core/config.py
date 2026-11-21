@@ -1,6 +1,7 @@
 """Configuration centrale : toutes les valeurs viennent de l'environnement (.env)."""
 from functools import lru_cache
 
+from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -19,6 +20,18 @@ class Settings(BaseSettings):
     jwt_secret: str = "change-me"
     jwt_algorithm: str = "HS256"
     access_token_minutes: int = 30
+
+    llm_base_url: str = "http://localhost:11434"
+    llm_model: str = "gemma3:4b"
+    llm_timeout_seconds: float = 60
+    llm_max_tokens: int = 600
+    llm_temperature: float = 0.2
+
+    rag_enabled: bool = False
+    rag_embedding_model: str = "nomic-embed-text"
+    rag_documents_dir: str = "data/knowledge_base"
+    rag_top_k: int = Field(default=4, gt=0, le=20)
+    rag_min_similarity: float = Field(default=0.25, ge=-1, le=1)
 
     model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8", extra="ignore")
 
