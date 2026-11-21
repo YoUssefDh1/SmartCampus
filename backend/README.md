@@ -14,6 +14,17 @@
 ## Tests
     python -m pytest -q
 
+## PostgreSQL
+Depuis la racine du dépôt, démarrer PostgreSQL avec `docker compose up -d`.
+Depuis le dossier `backend` (environnement Python activé), appliquer le schéma et charger
+les données de démonstration :
+
+    python -m app.db.migrate
+    python -m app.db.seed
+
+Les modifications de schéma ultérieures doivent être ajoutées comme fichiers SQL numérotés
+dans `backend/migrations/`; une migration déjà appliquée ne doit pas être modifiée.
+
 ## Structure
     app/main.py              création de l'application
     app/core/                config, erreurs, middleware, rôles
