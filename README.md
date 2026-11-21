@@ -8,6 +8,8 @@ Plateforme agentique d'orientation universitaire (IIT / ISB) - Projet IA génér
     ├── backend/             API FastAPI (Python)              -> http://localhost:8000
     ├── frontend/            Interface Next.js (React)          -> http://localhost:3000
     ├── data/demo/           Données de démonstration (JSON)
+    ├── schema.sql           Schéma initial versionné (tables, relations, fonctions)
+    ├── seed.sql              Données de démonstration reproductibles
     ├── docker/init.sql      Active pgvector dans PostgreSQL
     ├── docker-compose.yml   Base PostgreSQL + pgvector         -> localhost:5432
     ├── .env.example         Variables de docker-compose
@@ -53,11 +55,23 @@ Si PowerShell refuse d'activer l'environnement :
     npm install
     copy .env.local.example .env.local      (Linux / macOS : cp .env.local.example .env.local)
 
-### 3.3 Base de données (optionnel pour l'instant)
+### 3.3 Base de données
 
     copy .env.example .env                  (à la racine ; Linux / macOS : cp)
     docker compose up -d
     docker compose ps                       (le service "db" doit être "healthy")
+
+Puis, depuis le dossier `backend` avec l'environnement Python activé :
+
+    pip install -r requirements.txt
+    copy .env.example .env                  (Linux / macOS : cp .env.example .env)
+    python -m app.db.migrate
+    python -m app.db.seed
+
+Les migrations SQL versionnées sont appliquées une seule fois et leur empreinte est vérifiée.
+Pour faire évoluer le schéma, ajouter un fichier SQL numéroté dans `backend/migrations/` ;
+ne pas modifier une migration déjà appliquée. Le seed est réexécutable sans ajouter de doublons.
+Le volume PostgreSQL reste local à chaque développeur et n'est pas commité.
 
 ## 4. Démarrage
 
@@ -121,7 +135,7 @@ Le catalogue lit ces fichiers tant que la base n'est pas prête. Le Membre 3 rem
 | `Address already in use` | Port 8000 ou 3000 occupé | Fermer l'autre programme ou changer de port |
 | `uvicorn` introuvable | Environnement Python non activé | Activer `.venv` (section 3.1) |
 | `docker compose` échoue | Docker Desktop non lancé | Lancer Docker Desktop puis réessayer |
-| Port 5432 déjà utilisé | PostgreSQL local installé | Changer POSTGRES_PORT dans .env |
+| Port 5432 déjà utilisé | PostgreSQL local installé | Changer POSTGRES_PORT dans le `.env` racine et utiliser le même port dans `backend/.env` (`DATABASE_URL`) |
 
 ## 9. Règles de travail en équipe
 
