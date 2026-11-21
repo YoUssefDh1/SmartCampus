@@ -1,0 +1,32 @@
+// Erreur unique levée par le client API : le reste de l'application ne manipule jamais de réponse brute.
+export class ApiError extends Error {
+  status: number;
+  code: string;
+  details: unknown[];
+  requestId: string | null;
+
+  constructor(status: number, code: string, message: string, details: unknown[] = [], requestId: string | null = null) {
+    super(message);
+    this.name = "ApiError";
+    this.status = status;
+    this.code = code;
+    this.details = details;
+    this.requestId = requestId;
+  }
+
+  /** Message lisible par le candidat, selon le type d'erreur. */
+  get userMessage(): string {
+    switch (this.code) {
+      case "NETWORK_ERROR": return "Impossible de joindre le serveur. Vérifiez que le backend est lancé.";
+      case "TIMEOUT": return "Le serveur met trop de temps à répondre. Réessayez.";
+      case "UNAUTHORIZED": return "Votre session a expiré. Veuillez vous reconnecter.";
+      case "FORBIDDEN": return "Vous n'avez pas accès à cette ressource.";
+      case "NOT_FOUND": return "Ressource introuvable.";
+      case "VALIDATION_ERROR": return "Certaines données sont invalides.";
+      case "NOT_IMPLEMENTED": return "Cette fonctionnalité n'est pas encore disponible.";
+      case "AI_UNAVAILABLE": return "L'assistant est momentanément indisponible. Réessayez dans un instant.";
+      case "TOO_MANY_REQUESTS": return "Trop de messages envoyés. Patientez quelques secondes.";
+      default: return this.message || "Une erreur est survenue.";
+    }
+  }
+}
