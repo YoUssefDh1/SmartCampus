@@ -1,4 +1,6 @@
+import asyncio
 import logging
+from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
@@ -7,6 +9,9 @@ from app.api.v1.router import api_router
 from app.core.config import get_settings
 from app.core.errors import register_error_handlers
 from app.core.middleware import RequestIdMiddleware
+from app.services.guest_service import purge_expired_guest_conversations
+
+logger = logging.getLogger("smartcampus")
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
 
@@ -25,6 +30,29 @@ TAGS = [
 ]
 
 
+async def _guest_purge_loop(interval_minutes: int) -> None:
+    """Purge périodique des conversations invitées expirées (SA-25)."""
+    while True:
+        await asyncio.sleep(interval_minutes * 60)
+        try:
+            deleted = await asyncio.to_thread(purge_expired_guest_conversations)
+            if deleted:
+                logger.info("Purge visiteur : %s conversation(s) expirée(s) supprimée(s).", deleted)
+        except Exception:
+            logger.exception("Échec de la purge des sessions visiteur.")
+
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    s = get_settings()
+    purge_task = None
+    if s.environment != "test":
+        purge_task = asyncio.create_task(_guest_purge_loop(s.guest_purge_interval_minutes))
+    yield
+    if purge_task:
+        purge_task.cancel()
+
+
 def create_app() -> FastAPI:
     s = get_settings()
     app = FastAPI(
@@ -35,6 +63,7 @@ def create_app() -> FastAPI:
         docs_url="/docs",
         redoc_url="/redoc",
         openapi_url="/openapi.json",
+        lifespan=lifespan,
     )
     app.add_middleware(CORSMiddleware, allow_origins=s.cors_origins, allow_credentials=True,
                        allow_methods=["*"], allow_headers=["*"])

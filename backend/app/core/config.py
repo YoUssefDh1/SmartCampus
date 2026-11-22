@@ -21,6 +21,20 @@ class Settings(BaseSettings):
     jwt_algorithm: str = "HS256"
     access_token_minutes: int = 30
 
+    # Comptes utilisateurs (SA-28)
+    refresh_token_days: int = Field(default=7, gt=0)
+    password_min_length: int = Field(default=8, gt=0)
+
+    # Sessions visiteur (SA-25)
+    guest_session_ttl_hours: int = Field(default=24, gt=0)
+    guest_max_messages: int = Field(default=20, gt=0)
+    guest_rate_limit_per_minute: int = Field(default=5, gt=0)
+    guest_purge_interval_minutes: int = Field(default=60, gt=0)
+
+    # Mémoire temporaire des conversations (SA-26)
+    memory_window_size: int = Field(default=10, gt=0)
+    max_message_length: int = Field(default=2000, gt=0)
+
     llm_base_url: str = "http://localhost:11434"
     llm_model: str = "gemma3:4b"
     llm_timeout_seconds: float = 60
