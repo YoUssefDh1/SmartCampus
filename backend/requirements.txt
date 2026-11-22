@@ -5,3 +5,5 @@ pydantic-settings>=2.4
 psycopg[binary]>=3.2
 pytest>=8.0
 httpx>=0.27
+psycopg[binary]>=3.2
+pypdf>=5.0
