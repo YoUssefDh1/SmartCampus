@@ -41,6 +41,12 @@ class ConflictError(AppError):
     status_code, code = 409, "CONFLICT"
 
 
+class UnprocessableError(AppError):
+    """Règle métier non respectée (même format que les erreurs de validation)."""
+
+    status_code, code = 422, "VALIDATION_ERROR"
+
+
 class FileTooLargeError(AppError):
     status_code, code = 413, "FILE_TOO_LARGE"
 
@@ -55,6 +61,10 @@ class TooManyRequestsError(AppError):
 
 class AIUnavailableError(AppError):
     status_code, code = 503, "AI_UNAVAILABLE"
+
+
+class DatabaseUnavailableError(AppError):
+    status_code, code = 503, "DATABASE_UNAVAILABLE"
 
 
 class NotImplementedYetError(AppError):

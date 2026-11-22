@@ -21,12 +21,26 @@ export class ApiError extends Error {
       case "TIMEOUT": return "Le serveur met trop de temps à répondre. Réessayez.";
       case "UNAUTHORIZED": return "Votre session a expiré. Veuillez vous reconnecter.";
       case "FORBIDDEN": return "Vous n'avez pas accès à cette ressource.";
-      case "NOT_FOUND": return "Ressource introuvable.";
-      case "VALIDATION_ERROR": return "Certaines données sont invalides.";
+      case "NOT_FOUND": return this.message || "Ressource introuvable.";
+      case "VALIDATION_ERROR":
+        return this.message && this.message !== "Données invalides." ? this.message : "Certaines données sont invalides.";
+      case "CONFLICT": return this.message || "Cette opération entre en conflit avec des données existantes.";
+      case "DATABASE_UNAVAILABLE": return "La base de données est injoignable. Vérifiez que PostgreSQL est lancé.";
       case "NOT_IMPLEMENTED": return "Cette fonctionnalité n'est pas encore disponible.";
       case "AI_UNAVAILABLE": return "L'assistant est momentanément indisponible. Réessayez dans un instant.";
       case "TOO_MANY_REQUESTS": return "Trop de messages envoyés. Patientez quelques secondes.";
       default: return this.message || "Une erreur est survenue.";
     }
+  }
+
+  /** Détails de validation lisibles : « champ : problème ». */
+  get detailMessages(): string[] {
+    return this.details.flatMap((d) => {
+      if (!d || typeof d !== "object") return [];
+      const { field, issue } = d as { field?: string; issue?: string };
+      if (!issue) return [];
+      const text = issue.replace(/^Value error, /, "");
+      return [field ? `${field} : ${text}` : text];
+    });
   }
 }

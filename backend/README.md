@@ -14,6 +14,8 @@
 ## Tests
     python -m pytest -q
 
+Les tests du catalogue (tests/test_catalog.py) ont besoin de PostgreSQL migré et seedé ; sinon ils sont ignorés.
+
 ## PostgreSQL
 Depuis la racine du dépôt, démarrer PostgreSQL avec `docker compose up -d`.
 Depuis le dossier `backend` (environnement Python activé), appliquer le schéma et charger
@@ -29,8 +31,10 @@ dans `backend/migrations/`; une migration déjà appliquée ne doit pas être mo
     app/main.py              création de l'application
     app/core/                config, erreurs, middleware, rôles
     app/api/v1/endpoints/    routes par domaine (une par membre)
+                             programs.py (public), catalog.py + catalog_pricing.py (gestion du catalogue)
     app/schemas/             schémas Pydantic (entrées / sorties)
     app/services/            logique métier (appelée par les routes)
+                             catalog_service, tuition_admission_service, programs_service, db_utils
     app/models/  app/db/     base de données (Membre 2)
     app/agents/              agents LangGraph (Membre 5)
 

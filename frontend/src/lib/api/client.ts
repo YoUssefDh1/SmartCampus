@@ -1,4 +1,5 @@
 // Client HTTP unique vers le backend : base URL, jeton JWT, timeout, et conversion des erreurs en ApiError.
+import { devRoleStore } from "./devRole";
 import { ApiError } from "./errors";
 import { tokenStore } from "./token";
 import type { ApiErrorBody } from "@/types/api";
@@ -6,7 +7,7 @@ import type { ApiErrorBody } from "@/types/api";
 export const API_URL = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000/api/v1";
 const TIMEOUT_MS = 15000;
 
-type Query = Record<string, string | number | undefined | null>;
+export type Query = Record<string, string | number | boolean | undefined | null>;
 interface Options { method?: string; body?: unknown; query?: Query; signal?: AbortSignal }
 
 // Appelé quand le backend répond 401 (ex. rediriger vers la connexion). Défini par l'application.
@@ -22,6 +23,7 @@ export async function request<T>(path: string, opts: Options = {}): Promise<T> {
   if (opts.body !== undefined && !isForm) headers["Content-Type"] = "application/json";
   const token = tokenStore.get();
   if (token) headers.Authorization = `Bearer ${token}`;
+  else if (path.startsWith("/catalog")) headers["X-Dev-Role"] = devRoleStore.get(); // mode démo (voir devRole.ts)
 
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), TIMEOUT_MS);

@@ -2,10 +2,10 @@
 
 from pathlib import Path
 
+from app.db.migrate import _migration_files
 from app.db.session import get_connection
 
 PROJECT_ROOT = Path(__file__).resolve().parents[3]
-INITIAL_MIGRATION = "001_initial_schema"
 
 
 def main() -> None:
@@ -19,12 +19,12 @@ def main() -> None:
         if not migration_table:
             raise RuntimeError("Run `python -m app.db.migrate` before loading the seed.")
 
-        applied = connection.execute(
-            "SELECT 1 FROM smartcampus_schema_migrations WHERE version = %s",
-            (INITIAL_MIGRATION,),
-        ).fetchone()
-        if not applied:
-            raise RuntimeError("Run `python -m app.db.migrate` before loading the seed.")
+        applied = {row[0] for row in connection.execute(
+            "SELECT version FROM smartcampus_schema_migrations").fetchall()}
+        missing = [version for version, _ in _migration_files() if version not in applied]
+        if missing:
+            raise RuntimeError(
+                f"Missing migrations {missing}: run `python -m app.db.migrate` before loading the seed.")
 
         with connection.transaction():
             connection.execute(sql, prepare=False)
