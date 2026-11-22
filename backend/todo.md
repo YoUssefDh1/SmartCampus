@@ -18,6 +18,8 @@ be improved. Ollama is the model runner; Gemma and Qwen are the models.
 
       ollama pull gemma3:4b
       ollama pull qwen3:4b
+      ollama pull minicpm-v:latest
+      ollama pull mistral:latest
       ollama list
 
 - [ ] Open a PowerShell terminal in `backend`.

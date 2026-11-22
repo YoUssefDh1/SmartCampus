@@ -17,7 +17,12 @@ sys.path.insert(0, str(BACKEND_DIR))
 from app.agents.prompts import SYSTEM_PROMPT  # noqa: E402
 
 DATASET_PATH = BACKEND_DIR / "data" / "llm_eval" / "prompts.json"
-DEFAULT_MODELS = ["gemma3:4b", "qwen3:4b"]
+DEFAULT_MODELS = [
+    "gemma3:4b",
+    "qwen3:4b",
+    "minicpm-v:latest",
+    "mistral:latest",
+]
 TIMEOUT_SECONDS = 180
 TEMPERATURE = 0.2
 TOP_P = 0.9

@@ -18,6 +18,8 @@ modèle à comparer :
 
     ollama pull gemma3:4b
     ollama pull qwen3:8b
+    ollama pull minicpm-v:latest
+    ollama pull mistral:latest
 
 Configurez `LLM_MODEL` dans `backend/.env` pour le modèle installé, par exemple
 `gemma3:4b` ou `qwen3:8b`. Le backend appelle l'API Ollama locale à
@@ -52,13 +54,15 @@ Le dépôt n'inclut pas encore de corpus officiel IIT/ISB. Les fichiers de proje
 et les documents personnels ne doivent pas être ajoutés comme sources
 administratives.
 
-## Évaluation comparative Gemma / Qwen (SA-31–33)
+## Évaluation comparative des modèles (SA-31–33)
 
 Le jeu d'évaluation et le barème sont dans `data/llm_eval/`. Pour exécuter les
 mêmes questions sur les deux modèles avec Ollama :
 
     ollama pull gemma3:4b
     ollama pull qwen3:4b
+    ollama pull minicpm-v:latest
+    ollama pull mistral:latest
     python scripts/benchmark_llm.py
 
 Le rapport JSON conserve les réponses brutes, les mesures de latence et de
