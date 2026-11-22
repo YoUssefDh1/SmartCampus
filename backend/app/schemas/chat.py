@@ -1,4 +1,6 @@
+from datetime import datetime
 from typing import Any, Literal
+from uuid import UUID
 
 from pydantic import BaseModel, Field, field_validator
 
@@ -36,3 +38,34 @@ class ChatResponse(BaseModel):
         "start_preregistration",
         "handover_human",
     ] = "ask_question"
+
+
+class ChatMessageItem(BaseModel):
+    id: UUID
+    role: Literal["user", "assistant", "system"]
+    content: str
+    language: str | None = None
+    sources: list[ChatSource] | None = None
+    next_action: str | None = None
+    profile_updates: dict[str, Any] | None = None
+    created_at: datetime
+
+
+class ChatSessionItem(BaseModel):
+    id: UUID
+    status: str
+    language: str | None = None
+    started_at: datetime
+    last_message_at: datetime | None = None
+    profile_draft: dict[str, Any] = Field(default_factory=dict)
+
+
+class ChatSessionListResponse(BaseModel):
+    items: list[ChatSessionItem]
+    total: int
+
+
+class ChatHistoryResponse(ChatSessionItem):
+    guest_session_id: UUID | None = None
+    messages: list[ChatMessageItem] = Field(default_factory=list)
+    total_messages: int

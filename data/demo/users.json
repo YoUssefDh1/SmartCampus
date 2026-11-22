@@ -1,0 +1,51 @@
+[
+  {
+    "email": "candidate@smartcampus.tn",
+    "full_name": "Candidat Test",
+    "role": "candidate",
+    "school_scope": null,
+    "password": "demo1234"
+  },
+  {
+    "email": "manager.iit@smartcampus.tn",
+    "full_name": "Manager IIT",
+    "role": "iit_manager",
+    "school_scope": "iit",
+    "password": "demo1234"
+  },
+  {
+    "email": "manager.isb@smartcampus.tn",
+    "full_name": "Manager ISB",
+    "role": "isb_manager",
+    "school_scope": "isb",
+    "password": "demo1234"
+  },
+  {
+    "email": "interviewer@smartcampus.tn",
+    "full_name": "Recruteur Jury",
+    "role": "interviewer",
+    "school_scope": null,
+    "password": "demo1234"
+  },
+  {
+    "email": "advisor@smartcampus.tn",
+    "full_name": "Conseiller Orientation",
+    "role": "advisor",
+    "school_scope": null,
+    "password": "demo1234"
+  },
+  {
+    "email": "direction@smartcampus.tn",
+    "full_name": "Membre Direction",
+    "role": "direction",
+    "school_scope": null,
+    "password": "demo1234"
+  },
+  {
+    "email": "admin@smartcampus.tn",
+    "full_name": "Administrateur Système",
+    "role": "admin",
+    "school_scope": null,
+    "password": "demo1234"
+  }
+]

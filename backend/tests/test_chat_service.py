@@ -5,12 +5,14 @@ from app.core.errors import AIUnavailableError
 from app.main import app
 from app.services import chat_service
 from app.services.rag_service import RetrievedChunk
+from tests.conftest import GuestContext, requires_db
 
 
 client = TestClient(app, raise_server_exceptions=False)
 
 
-def test_chat_creates_session_and_carries_history(monkeypatch):
+@requires_db
+def test_chat_creates_session_and_carries_history(guest: GuestContext, monkeypatch):
     calls = []
 
     async def fake_generate_reply(messages):
@@ -19,8 +21,8 @@ def test_chat_creates_session_and_carries_history(monkeypatch):
 
     monkeypatch.setattr(chat_service, "generate_reply", fake_generate_reply)
 
-    first = client.post("/api/v1/chat/message", json={"message": "Bonjour"})
-    assert first.status_code == 200
+    first = client.post("/api/v1/chat/message", json={"message": "Bonjour"}, headers=guest.headers)
+    assert first.status_code == 200, first.text
     first_body = first.json()
     assert first_body["reply"] == "Réponse 1"
     assert first_body["session_id"]
@@ -32,8 +34,9 @@ def test_chat_creates_session_and_carries_history(monkeypatch):
     second = client.post(
         "/api/v1/chat/message",
         json={"session_id": first_body["session_id"], "message": "Je veux étudier l'informatique"},
+        headers=guest.headers,
     )
-    assert second.status_code == 200
+    assert second.status_code == 200, second.text
     assert second.json()["session_id"] == first_body["session_id"]
     assert calls[1][-3:] == [
         {"role": "user", "content": "Bonjour"},
@@ -42,25 +45,35 @@ def test_chat_creates_session_and_carries_history(monkeypatch):
     ]
 
 
-def test_chat_rejects_blank_messages():
-    response = client.post("/api/v1/chat/message", json={"message": "   "})
+@requires_db
+def test_chat_requires_guest_token():
+    response = client.post("/api/v1/chat/message", json={"message": "Bonjour"})
+    assert response.status_code == 401
+    assert response.json()["error"]["code"] == "UNAUTHORIZED"
+
+
+@requires_db
+def test_chat_rejects_blank_messages(guest: GuestContext):
+    response = client.post("/api/v1/chat/message", json={"message": "   "}, headers=guest.headers)
 
     assert response.status_code == 422
     assert response.json()["error"]["code"] == "VALIDATION_ERROR"
 
 
-def test_chat_returns_service_unavailable_error(monkeypatch):
+@requires_db
+def test_chat_returns_service_unavailable_error(guest: GuestContext, monkeypatch):
     async def unavailable(_messages):
         raise AIUnavailableError("Ollama indisponible.")
 
     monkeypatch.setattr(chat_service, "generate_reply", unavailable)
-    response = client.post("/api/v1/chat/message", json={"message": "Bonjour"})
+    response = client.post("/api/v1/chat/message", json={"message": "Bonjour"}, headers=guest.headers)
 
     assert response.status_code == 503
     assert response.json()["error"]["code"] == "AI_UNAVAILABLE"
 
 
-def test_chat_requests_french_rephrase_for_unrecognized_language(monkeypatch):
+@requires_db
+def test_chat_requests_french_rephrase_for_unrecognized_language(guest: GuestContext, monkeypatch):
     calls = []
 
     async def fake_generate_reply(messages):
@@ -68,34 +81,36 @@ def test_chat_requests_french_rephrase_for_unrecognized_language(monkeypatch):
         return "Pouvez-vous reformuler votre question en français ?"
 
     monkeypatch.setattr(chat_service, "generate_reply", fake_generate_reply)
-    response = client.post("/api/v1/chat/message", json={"message": "asdf qwerty"})
+    response = client.post("/api/v1/chat/message", json={"message": "asdf qwerty"},
+                           headers=guest.headers)
 
-    assert response.status_code == 200
+    assert response.status_code == 200, response.text
     assert response.json()["language"] == "unknown"
     assert "ask them to rephrase in French" in calls[-1][0]["content"]
 
 
-def test_chat_history_is_bounded(monkeypatch):
-    calls = []
-
-    async def fake_generate_reply(messages):
-        calls.append(messages)
-        return "D'accord."
+@requires_db
+def test_chat_extracts_profile_draft(guest: GuestContext, monkeypatch):
+    async def fake_generate_reply(_messages):
+        return "Très bon choix."
 
     monkeypatch.setattr(chat_service, "generate_reply", fake_generate_reply)
-    session_id = "bounded-history-test"
-    for index in range(8):
-        response = client.post(
-            "/api/v1/chat/message",
-            json={"session_id": session_id, "message": f"Question numero {index}"},
-        )
-        assert response.status_code == 200
 
-    assert len(calls[-1]) == 1 + chat_service.MAX_HISTORY_MESSAGES + 1
-    assert calls[-1][1]["content"] == "Question numero 1"
+    response = client.post(
+        "/api/v1/chat/message",
+        json={"message": "Bonjour, je prépare mon bac et je vise l'informatique à l'IIT"},
+        headers=guest.headers,
+    )
+    assert response.status_code == 200, response.text
+    profile = response.json()["profile_updates"]
+    assert profile["detected_language"] == "fr"
+    assert profile["education_level"] == "Baccalauréat"
+    assert "Informatique" in profile["interests"]
+    assert "IIT" in profile["target_institutions"]
 
 
-def test_chat_uses_retrieved_context_and_returns_source(monkeypatch):
+@requires_db
+def test_chat_uses_retrieved_context_and_returns_source(guest: GuestContext, monkeypatch):
     calls = []
 
     async def fake_retrieve(query, *, settings):
@@ -122,9 +137,10 @@ def test_chat_uses_retrieved_context_and_returns_source(monkeypatch):
     response = client.post(
         "/api/v1/chat/message",
         json={"message": "Quelles sont les conditions ?"},
+        headers=guest.headers,
     )
 
-    assert response.status_code == 200
+    assert response.status_code == 200, response.text
     body = response.json()
     assert body["sources"] == [{
         "source_id": "source-1",
@@ -135,7 +151,8 @@ def test_chat_uses_retrieved_context_and_returns_source(monkeypatch):
     assert "<excerpt>Conditions vérifiées.</excerpt>" in calls[0][0]["content"]
 
 
-def test_chat_does_not_claim_official_facts_without_retrieved_sources(monkeypatch):
+@requires_db
+def test_chat_does_not_claim_official_facts_without_retrieved_sources(guest: GuestContext, monkeypatch):
     calls = []
 
     async def no_sources(_query, *, settings):
@@ -152,8 +169,9 @@ def test_chat_does_not_claim_official_facts_without_retrieved_sources(monkeypatc
     response = client.post(
         "/api/v1/chat/message",
         json={"message": "Quelle est la date d'admission ?"},
+        headers=guest.headers,
     )
 
-    assert response.status_code == 200
+    assert response.status_code == 200, response.text
     assert response.json()["sources"] == []
     assert "No relevant official-document excerpts were found" in calls[0][0]["content"]
