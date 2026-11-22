@@ -1,7 +1,8 @@
 """Rôles de la plateforme (figés en SA-5) et contrôle d'accès (RBAC) des routes.
 
 L'émission des jetons (/auth/login) est codée par le Membre 4 (SA-28). Ce module ne fait que LIRE
-le jeton : claims attendus `sub` (uuid du compte app_user ou de la guest_session) et `role`.
+le jeton : claims attendus `sub` (uuid du compte app_user ou de la guest_session), `role` et `exp`
+(obligatoire : un jeton sans expiration est refusé).
 Pour le personnel, le rôle et l'école sont relus dans app_user : un compte désactivé perd
 l'accès immédiatement.
 
@@ -107,7 +108,9 @@ def get_current_actor(
 
     if credentials:
         try:
-            claims = jwt.decode(credentials.credentials, settings.jwt_secret, algorithms=[settings.jwt_algorithm])
+            # exp obligatoire : un jeton sans date d'expiration resterait valable à vie s'il fuitait.
+            claims = jwt.decode(credentials.credentials, settings.jwt_secret, algorithms=[settings.jwt_algorithm],
+                                options={"require": ["exp", "sub"]})
             role = Role(claims.get("role"))
             subject = UUID(str(claims.get("sub")))
         except (jwt.PyJWTError, ValueError) as exc:

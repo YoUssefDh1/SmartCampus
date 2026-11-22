@@ -36,3 +36,19 @@ def db():
         pytest.skip("Migration 002 absente : lancer `python -m app.db.migrate` puis `python -m app.db.seed`.")
     yield conn
     conn.close()
+
+
+@pytest.fixture(scope="module")
+def catalog_cleanup(db):
+    """Supprime, à la fin de chaque module, tout ce que les tests ont créé (codes « T-… »).
+    Ordre : comptes de test (et leurs préinscriptions) d'abord, puis formations, puis matières."""
+    yield
+    db.execute("DELETE FROM app_user WHERE email LIKE 'test-%@smartcampus.test'")
+    db.execute("DELETE FROM program WHERE code LIKE 'T-%'")
+    db.execute("DELETE FROM subject WHERE code LIKE 'T-%'")
+
+
+@pytest.hookimpl(optionalhook=True)
+def pytest_html_report_title(report):
+    """Titre du rapport HTML (python -m pytest --html=rapport_tests.html --self-contained-html)."""
+    report.title = "SmartCampus AI - Tests des API du catalogue"

@@ -3,6 +3,7 @@
 Prérequis : base migrée et seed chargé (python -m app.db.migrate && python -m app.db.seed).
 Les éléments créés ici ont un code « T-xxxxxxxx » et sont supprimés à la fin.
 """
+import time
 import uuid
 from datetime import date, timedelta
 
@@ -22,12 +23,7 @@ def code() -> str:
     return f"T-{uuid.uuid4().hex[:8]}".upper()
 
 
-@pytest.fixture(scope="module", autouse=True)
-def cleanup(db):
-    yield
-    db.execute("DELETE FROM program WHERE code LIKE 'T-%'")
-    db.execute("DELETE FROM subject WHERE code LIKE 'T-%'")
-    db.execute("DELETE FROM app_user WHERE email LIKE 'test-%@smartcampus.test'")
+pytestmark = pytest.mark.usefixtures("catalog_cleanup")
 
 
 @pytest.fixture(scope="module")
@@ -90,7 +86,8 @@ def test_jwt_staff_token(client, db):
            VALUES ('isb_manager', %s, 'Test', 'Manager', %s, 'x') RETURNING id""",
         (inst, f"test-{uuid.uuid4().hex[:6]}@smartcampus.test")).fetchone()[0]
     s = get_settings()
-    token = jwt.encode({"sub": str(user_id), "role": "isb_manager"}, s.jwt_secret, algorithm=s.jwt_algorithm)
+    token = jwt.encode({"sub": str(user_id), "role": "isb_manager", "exp": int(time.time()) + 600},
+                       s.jwt_secret, algorithm=s.jwt_algorithm)
     r = client.get(f"{API}/catalog/programs", headers={"Authorization": f"Bearer {token}"})
     assert r.status_code == 200 and {p["school"] for p in r.json()["items"]} == {"ISB"}
     assert client.get(f"{API}/catalog/programs", headers={"Authorization": "Bearer faux"}).status_code == 401
