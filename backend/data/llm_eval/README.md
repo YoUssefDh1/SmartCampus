@@ -13,6 +13,8 @@ On the machine running Ollama, install the candidate models first:
 
     ollama pull gemma3:4b
     ollama pull qwen3:4b
+    ollama pull minicpm-v:latest
+    ollama pull mistral:latest
 
 From `backend/`, run:
 

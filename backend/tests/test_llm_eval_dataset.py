@@ -25,6 +25,15 @@ def test_llm_evaluation_dataset_has_valid_multilingual_cases():
         assert all(message["role"] in {"user", "assistant"} for message in case["messages"])
 
 
+def test_benchmark_default_models_include_installed_candidates():
+    assert benchmark_llm.DEFAULT_MODELS == [
+        "gemma3:4b",
+        "qwen3:4b",
+        "minicpm-v:latest",
+        "mistral:latest",
+    ]
+
+
 def test_benchmark_runs_the_same_cases_for_each_model(monkeypatch):
     def fake_request_chat(_base_url, model, _messages):
         return {
