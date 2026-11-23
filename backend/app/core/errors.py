@@ -19,9 +19,14 @@ class AppError(Exception):
     status_code = 400
     code = "BAD_REQUEST"
 
-    def __init__(self, message: str = "Requête invalide.", details: list | None = None):
+    def __init__(self, message: str = "Requête invalide.", details: list | None = None,
+                 code: str | None = None):
         self.message = message
         self.details = details or []
+        if code:
+            # Code sémantique propre à l'incident (ex. EMAIL_ALREADY_EXISTS en SA-28),
+            # qui prime sur le code générique de la classe.
+            self.code = code
         super().__init__(message)
 
 

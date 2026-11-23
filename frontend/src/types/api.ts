@@ -8,7 +8,7 @@ export interface Page<T> { items: T[]; total: number; page: number; size: number
 export interface HealthResponse { status: string; app: string; version: string; environment: string }
 
 export interface ChatRequest { session_id?: string; message: string }
-export interface ChatSource { program_id: string; title: string; origin: string }
+export interface ChatSource { source_id: string; title: string; origin: string; page?: number | null }
 export interface ChatResponse {
   session_id: string; reply: string; language: string; sources: ChatSource[];
   profile_updates: Record<string, unknown>;

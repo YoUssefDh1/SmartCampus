@@ -1,0 +1,46 @@
+[
+  {
+    "id": "iit-prepa-integree",
+    "school": "IIT",
+    "name": "Préparatoire intégrée en informatique",
+    "level": "Préparatoire",
+    "duration_years": 2,
+    "description": "Cycle préparatoire intégré de deux ans qui pose les bases scientifiques (mathématiques, algorithmique, physique) avant l'entrée en cycle ingénieur.",
+    "admission": "Sur dossier après le baccalauréat (sciences, mathématiques ou technique) et entretien de motivation.",
+    "careers": ["Poursuite en cycle ingénieur", "Assistant développeur"],
+    "bridges": ["iit-ingenieur-informatique", "iit-ingenieur-ia-data"]
+  },
+  {
+    "id": "iit-ingenieur-informatique",
+    "school": "IIT",
+    "name": "Cycle ingénieur en génie logiciel",
+    "level": "Ingénieur",
+    "duration_years": 3,
+    "description": "Formation d'ingénieur orientée conception et développement de logiciels : architecture, bases de données, cloud, sécurité et DevOps.",
+    "admission": "Après une préparatoire intégrée ou un concours d'entrée sur dossier et épreuve écrite.",
+    "careers": ["Ingénieur logiciel", "Architecte applicatif", "Ingénieur DevOps", "Lead technique"],
+    "bridges": ["iit-prepa-integree", "isb-master-data-science"]
+  },
+  {
+    "id": "iit-ingenieur-ia-data",
+    "school": "IIT",
+    "name": "Cycle ingénieur en intelligence artificielle et data",
+    "level": "Ingénieur",
+    "duration_years": 3,
+    "description": "Parcours ingénieur spécialisé en apprentissage automatique, traitement du langage et valorisation de la donnée, avec un projet fil rouge chaque année.",
+    "admission": "Après une préparatoire intégrée ou un dossier scientifique incluant un projet personnel en data.",
+    "careers": ["Data scientist", "Ingénieur IA", "Ingénieur MLOps", "Analyste décisionnel"],
+    "bridges": ["iit-prepa-integree", "isb-master-data-science"]
+  },
+  {
+    "id": "isb-master-data-science",
+    "school": "ISB",
+    "name": "Master en science des données appliquées aux affaires",
+    "level": "Master",
+    "duration_years": 2,
+    "description": "Master professionnalisant qui combine analyse de données, business intelligence et management, avec un stage long en entreprise en deuxième année.",
+    "admission": "Sur dossier (licence en informatique, gestion ou économie) et entretien avec le jury d'admission.",
+    "careers": ["Analyste business intelligence", "Chef de projet data", "Consultant en transformation numérique"],
+    "bridges": ["iit-ingenieur-ia-data"]
+  }
+]
