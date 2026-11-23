@@ -21,10 +21,14 @@ From `backend/`, run:
     python scripts/benchmark_llm.py
 
 The runner warms up each model, then sends every case to each model with the
-same system prompt and generation options. It saves raw outputs and Ollama
-timing/token metrics to a timestamped JSON file under
+same system prompt and generation options. It saves raw outputs, completion
+reasons, and Ollama timing/token metrics to a timestamped JSON file under
 `data/llm_eval/results/`. Generated reports are local and are not intended for
 Git.
+
+For Qwen3 models, the runner disables the separate thinking output so the
+generation token limit is available for the answer text. Without this, a run
+may use its token budget for thinking and return an empty `message.content`.
 
 To select other installed models or change the endpoint:
 

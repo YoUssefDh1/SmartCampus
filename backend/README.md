@@ -71,8 +71,18 @@ débit, ainsi que des champs de notation humaine. Complétez la revue selon
 modèle. Les résultats locaux sont ignorés par Git.
 
 Pour tester le modèle configuré via le parcours FastAPI (réponses réelles,
-code-switching et mémoire entre tours), démarrez Ollama et le backend, puis
-lancez dans `backend/` :
+code-switching et mémoire entre tours), Ollama et PostgreSQL doivent être lancés.
+Le test crée une vraie session visiteur et utilise PostgreSQL pour conserver
+l'historique; Uvicorn n'a pas besoin d'être démarré.
+
+Depuis la racine du dépôt, démarrez la base :
+
+    docker compose up -d db
+
+Puis, depuis `backend/`, appliquez le schéma et le seed avant de lancer le test :
+
+    python -m app.db.migrate
+    python -m app.db.seed
 
     $env:RUN_LLM_INTEGRATION="1"
     python -m pytest -q tests/integration/test_live_ollama.py

@@ -3,8 +3,9 @@ from uuid import UUID
 
 from fastapi import APIRouter, Depends
 
-from app.core.security import (create_guest_access_token, decode_guest_token, get_current_user,
-                               require_roles)
+from app.core.errors import ForbiddenError
+from app.core.security import (Actor, create_guest_access_token, decode_guest_token,
+                               get_current_user, require_roles)
 from app.db.session import get_dict_connection
 from app.models.user import Role, UserAccount
 from app.schemas.auth import (ClaimRequest, ClaimResponse, GuestTokenResponse, LoginRequest,
@@ -64,15 +65,17 @@ def get_me(current_user: UserAccount = Depends(get_current_user)) -> UserRespons
 @router.post("/claim", response_model=ClaimResponse,
              summary="Rattache la conversation invitée au compte")
 def post_claim(request: ClaimRequest,
-               current_user: UserAccount = Depends(require_roles(Role.CANDIDATE))) -> ClaimResponse:
+               current_user: Actor = Depends(require_roles(Role.CANDIDATE))) -> ClaimResponse:
     """Double preuve : JWT candidat en en-tête + JWT visiteur signé dans le corps (SA-29)."""
     decode_guest_token(request.guest_token, request.guest_session_id)
+    if current_user.user_id is None:
+        raise ForbiddenError("Un compte candidat authentifié est requis.")
     with get_dict_connection() as connection:
         result = claim_guest_session(connection, guest_session_id=str(request.guest_session_id),
-                                     candidate_id=current_user.id)
+                                     candidate_id=str(current_user.user_id))
     return ClaimResponse(
         message="Session invitée rattachée au compte candidat avec succès.",
-        user_id=UUID(current_user.id),
+        user_id=current_user.user_id,
         claimed_conversation_ids=[UUID(conversation_id) for conversation_id in result.conversation_ids],
         transferred_messages_count=result.transferred_messages,
         merged_profile_draft=result.merged_profile,

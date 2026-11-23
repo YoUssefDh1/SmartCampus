@@ -6,6 +6,10 @@ from app.core.config import Settings, get_settings
 from app.core.errors import AIUnavailableError
 
 
+def is_qwen3_model(model: str) -> bool:
+    return model.casefold().startswith("qwen3")
+
+
 async def generate_reply(
     messages: list[dict[str, str]],
     *,
@@ -23,6 +27,8 @@ async def generate_reply(
             "num_predict": config.llm_max_tokens,
         },
     }
+    if is_qwen3_model(config.llm_model):
+        payload["think"] = False
 
     try:
         async with httpx.AsyncClient(

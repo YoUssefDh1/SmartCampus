@@ -22,9 +22,37 @@ class Settings(BaseSettings):
     jwt_algorithm: str = "HS256"
     access_token_minutes: int = 30
 
+    # Comptes utilisateurs
+    refresh_token_days: int = Field(default=7, gt=0)
+    password_min_length: int = Field(default=8, gt=0)
+
     # Mode démo de l'authentification (tant que /auth/login n'existe pas, SA-28).
     # Actif UNIQUEMENT si ENVIRONMENT=development : l'en-tête X-Dev-Role simule un utilisateur.
     auth_dev_mode: bool = False
+
+    # Sessions visiteur
+    guest_session_ttl_hours: int = Field(default=24, gt=0)
+    guest_max_messages: int = Field(default=20, gt=0)
+    guest_rate_limit_per_minute: int = Field(default=5, gt=0)
+    guest_purge_interval_minutes: int = Field(default=60, gt=0)
+
+    # Mémoire conversationnelle
+    memory_window_size: int = Field(default=10, gt=0)
+    max_message_length: int = Field(default=2000, gt=0)
+
+    # Ollama
+    llm_base_url: str = "http://localhost:11434"
+    llm_model: str = "gemma3:4b"
+    llm_timeout_seconds: float = Field(default=60, gt=0)
+    llm_max_tokens: int = Field(default=600, gt=0)
+    llm_temperature: float = Field(default=0.2, ge=0, le=2)
+
+    # Retrieval-augmented generation
+    rag_enabled: bool = False
+    rag_embedding_model: str = "nomic-embed-text"
+    rag_documents_dir: str = "data/knowledge_base"
+    rag_top_k: int = Field(default=4, gt=0, le=20)
+    rag_min_similarity: float = Field(default=0.25, ge=-1, le=1)
 
     @property
     def dev_auth_enabled(self) -> bool:
