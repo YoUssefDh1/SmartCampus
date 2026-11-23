@@ -9,16 +9,19 @@ from app.api.v1.router import api_router
 from app.core.config import get_settings
 from app.core.errors import register_error_handlers
 from app.core.middleware import RequestIdMiddleware
-from app.services.guest_service import purge_expired_guest_conversations
-
-logger = logging.getLogger("smartcampus")
+from app.db.session import close_pool
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
 
 TAGS = [
     {"name": "Système", "description": "Santé du service"},
     {"name": "Auth", "description": "Sessions visiteur, comptes, connexion"},
-    {"name": "Catalogue", "description": "Formations IIT / ISB, tarifs, conditions d'admission"},
+    {"name": "Catalogue", "description": "Consultation publique : formations IIT / ISB, tarifs et conditions "
+                                         "d'admission officiels (publiés et valides)"},
+    {"name": "Gestion des formations", "description": "Responsables / admin : formations, spécialités, "
+                                                      "programmes pédagogiques, matières"},
+    {"name": "Tarifs et admission", "description": "Responsables / admin : frais de scolarité, modalités de "
+                                                   "paiement, conditions d'admission, publication et validité"},
     {"name": "Candidats", "description": "Dossier et profil d'orientation"},
     {"name": "Conversations", "description": "Chat texte et vocal, historique"},
     {"name": "Documents", "description": "Pièces des candidats"},
@@ -30,27 +33,10 @@ TAGS = [
 ]
 
 
-async def _guest_purge_loop(interval_minutes: int) -> None:
-    """Purge périodique des conversations invitées expirées (SA-25)."""
-    while True:
-        await asyncio.sleep(interval_minutes * 60)
-        try:
-            deleted = await asyncio.to_thread(purge_expired_guest_conversations)
-            if deleted:
-                logger.info("Purge visiteur : %s conversation(s) expirée(s) supprimée(s).", deleted)
-        except Exception:
-            logger.exception("Échec de la purge des sessions visiteur.")
-
-
 @asynccontextmanager
-async def lifespan(app: FastAPI):
-    s = get_settings()
-    purge_task = None
-    if s.environment != "test":
-        purge_task = asyncio.create_task(_guest_purge_loop(s.guest_purge_interval_minutes))
+async def lifespan(_: FastAPI):
     yield
-    if purge_task:
-        purge_task.cancel()
+    close_pool()
 
 
 def create_app() -> FastAPI:

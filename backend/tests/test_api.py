@@ -48,14 +48,4 @@ def test_business_error_and_unexpected_error():
     assert "secret" not in r.text  # aucun détail interne exposé
 
 
-def test_programs_list_and_filter():
-    r = client.get("/api/v1/programs")
-    assert r.status_code == 200 and r.json()["total"] >= 3
-    r = client.get("/api/v1/programs?school=ISB")
-    assert all(p["school"] == "ISB" for p in r.json()["items"])
-
-
-def test_program_detail_and_404():
-    assert client.get("/api/v1/programs/iit-prepa-integree").json()["level"] == "Préparatoire"
-    r = client.get("/api/v1/programs/nope")
-    assert r.status_code == 404 and r.json()["error"]["code"] == "NOT_FOUND"
+# Les tests du catalogue (formations, tarifs, admission) sont dans test_catalog.py.
