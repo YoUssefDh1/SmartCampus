@@ -11,17 +11,23 @@ Mode démo (AUTH_DEV_MODE=true ET ENVIRONMENT=development) : sans jeton, l'en-t�
 l'école est déduite du rôle (iit_manager -> IIT). À désactiver dès que /auth/login existe.
 """
 from dataclasses import dataclass
+from datetime import datetime, timedelta, timezone
 from enum import Enum
 from uuid import UUID
 
 import jwt
 import psycopg
+from argon2 import PasswordHasher
+from argon2.exceptions import InvalidHashError, VerifyMismatchError
 from fastapi import Depends, Header, Request
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 
 from app.core.config import get_settings
 from app.core.errors import ForbiddenError, UnauthorizedError
-from app.db.session import get_db
+from app.db.session import get_db, get_dict_connection
+from app.models.user import UserAccount
+from app.services import user_service
+from app.services.guest_service import GuestSession, fetch_guest_session, touch_guest_session
 
 
 class Role(str, Enum):
@@ -67,6 +73,139 @@ class Actor:
 
 
 _bearer = HTTPBearer(auto_error=False, description="Jeton JWT obtenu via /auth/login")
+_password_hasher = PasswordHasher()
+
+
+@dataclass
+class TokenPayload:
+    sub: str | None = None
+    session_id: str | None = None
+    role: str | None = None
+    token_type: str | None = None
+    exp: int | None = None
+
+    @property
+    def is_guest(self) -> bool:
+        return self.role == Role.GUEST.value
+
+
+def hash_password(plain_password: str) -> str:
+    return _password_hasher.hash(plain_password)
+
+
+def verify_password(plain_password: str, password_hash: str) -> bool:
+    try:
+        return _password_hasher.verify(password_hash, plain_password)
+    except (VerifyMismatchError, InvalidHashError, ValueError):
+        return False
+
+
+def create_guest_access_token(session_id: str, expires_at: datetime | None = None) -> str:
+    settings = get_settings()
+    now = datetime.now(timezone.utc)
+    if expires_at is None:
+        expires_at = now + timedelta(hours=settings.guest_session_ttl_hours)
+    return jwt.encode(
+        {
+            "sub": f"guest_{session_id}",
+            "session_id": str(session_id),
+            "role": Role.GUEST.value,
+            "iat": now,
+            "exp": expires_at,
+        },
+        settings.jwt_secret,
+        algorithm=settings.jwt_algorithm,
+    )
+
+
+def create_user_access_token(user: UserAccount) -> str:
+    settings = get_settings()
+    now = datetime.now(timezone.utc)
+    return jwt.encode(
+        {
+            "sub": user.id,
+            "role": user.role,
+            "school_scope": user.school_scope,
+            "type": "access",
+            "iat": now,
+            "exp": now + timedelta(minutes=settings.access_token_minutes),
+        },
+        settings.jwt_secret,
+        algorithm=settings.jwt_algorithm,
+    )
+
+
+def decode_token(token: str, *, verify_expiry: bool = True) -> TokenPayload:
+    settings = get_settings()
+    options = None if verify_expiry else {"verify_exp": False}
+    try:
+        claims = jwt.decode(
+            token,
+            settings.jwt_secret,
+            algorithms=[settings.jwt_algorithm],
+            options=options,
+        )
+    except jwt.PyJWTError as exc:
+        raise UnauthorizedError("Session invitée expirée ou jeton invalide.") from exc
+    return TokenPayload(
+        sub=claims.get("sub"),
+        session_id=claims.get("session_id"),
+        role=claims.get("role"),
+        token_type=claims.get("type"),
+        exp=claims.get("exp"),
+    )
+
+
+def decode_guest_token(guest_token: str, expected_session_id: str) -> TokenPayload:
+    invalid = ForbiddenError(
+        "Jeton invité invalide pour cette session.", code="INVALID_GUEST_TOKEN"
+    )
+    try:
+        payload = decode_token(guest_token, verify_expiry=False)
+    except UnauthorizedError as exc:
+        raise invalid from exc
+    if not payload.is_guest or payload.session_id != str(expected_session_id):
+        raise invalid
+    return payload
+
+
+def get_current_guest_session(
+    credentials: HTTPAuthorizationCredentials | None = Depends(_bearer),
+) -> GuestSession:
+    if credentials is None:
+        raise UnauthorizedError("Jeton d'authentification manquant.")
+
+    payload = decode_token(credentials.credentials)
+    if not payload.is_guest or not payload.session_id:
+        raise ForbiddenError("Le jeton fourni n'est pas un jeton invité valide.")
+
+    with get_dict_connection() as connection:
+        session = fetch_guest_session(connection, payload.session_id)
+        if session is None:
+            raise UnauthorizedError("Session invitée introuvable.")
+        if session.expired:
+            raise UnauthorizedError("Session invitée expirée ou jeton invalide.")
+        touch_guest_session(connection, session.id)
+    return session
+
+
+def get_current_user(
+    credentials: HTTPAuthorizationCredentials | None = Depends(_bearer),
+) -> UserAccount:
+    if credentials is None:
+        raise UnauthorizedError("Jeton d'authentification manquant.")
+
+    payload = decode_token(credentials.credentials)
+    if payload.is_guest or not payload.sub:
+        raise ForbiddenError("Un jeton visiteur ne donne pas accès à un compte utilisateur.")
+
+    with get_dict_connection() as connection:
+        user = user_service.fetch_user_by_id(connection, payload.sub)
+    if user is None:
+        raise UnauthorizedError("Compte introuvable.")
+    if not user.is_active:
+        raise UnauthorizedError("Ce compte a été désactivé.", code="ACCOUNT_DISABLED")
+    return user
 
 
 def _staff_actor(conn: psycopg.Connection, user_id: UUID, request_id: str | None) -> Actor:
@@ -112,11 +251,14 @@ def get_current_actor(
             claims = jwt.decode(credentials.credentials, settings.jwt_secret, algorithms=[settings.jwt_algorithm],
                                 options={"require": ["exp", "sub"]})
             role = Role(claims.get("role"))
-            subject = UUID(str(claims.get("sub")))
+            subject_value = str(claims.get("sub"))
+            subject = None if role == Role.GUEST else UUID(subject_value)
         except (jwt.PyJWTError, ValueError) as exc:
             raise UnauthorizedError("Jeton invalide ou expiré.") from exc
         if role == Role.GUEST:
             return Actor(None, Role.GUEST, request_id=request_id)
+        if subject is None:
+            raise UnauthorizedError("Jeton invalide ou expiré.")
         return _staff_actor(conn, subject, request_id)
 
     if settings.dev_auth_enabled and x_dev_role:
@@ -127,9 +269,10 @@ def get_current_actor(
 
 def require_roles(*roles: Role):
     """Dépendance de route : `actor: Actor = Depends(require_roles(Role.ADMIN, ...))`."""
+    allowed = {role.value for role in roles}
 
     def checker(actor: Actor = Depends(get_current_actor)) -> Actor:
-        if actor.role not in roles:
+        if actor.role != Role.ADMIN and actor.role.value not in allowed:
             raise ForbiddenError("Votre rôle ne permet pas cette action.")
         return actor
 

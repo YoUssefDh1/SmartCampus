@@ -15,6 +15,7 @@ BACKEND_DIR = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(BACKEND_DIR))
 
 from app.agents.prompts import SYSTEM_PROMPT  # noqa: E402
+from app.services.llm_service import is_qwen3_model  # noqa: E402
 
 DATASET_PATH = BACKEND_DIR / "data" / "llm_eval" / "prompts.json"
 DEFAULT_MODELS = [
@@ -22,6 +23,9 @@ DEFAULT_MODELS = [
     "qwen3:4b",
     "minicpm-v:latest",
     "mistral:latest",
+    "qwen3:8b",
+    "llava:7b",
+    "phi:2.7b"
 ]
 TIMEOUT_SECONDS = 180
 TEMPERATURE = 0.2
@@ -49,6 +53,9 @@ def request_chat(
             "num_predict": MAX_TOKENS,
         },
     }
+    if is_qwen3_model(model):
+        payload["think"] = False
+
     request = Request(
         f"{base_url.rstrip('/')}/api/chat",
         data=json.dumps(payload, ensure_ascii=False).encode("utf-8"),
@@ -69,7 +76,16 @@ def request_chat(
         raise OllamaRequestError("Ollama returned an unexpected response shape.")
     content = data["message"].get("content")
     if not isinstance(content, str) or not content.strip():
-        raise OllamaRequestError("Ollama returned an empty response.")
+        details = []
+        if data.get("done_reason"):
+            details.append(f"done_reason={data['done_reason']}")
+        if isinstance(data.get("eval_count"), int):
+            details.append(f"generated_tokens={data['eval_count']}")
+        thinking = data["message"].get("thinking")
+        if isinstance(thinking, str) and thinking.strip():
+            details.append(f"thinking_chars={len(thinking)}")
+        suffix = f" ({', '.join(details)})" if details else ""
+        raise OllamaRequestError(f"Ollama returned an empty response{suffix}.")
     return data, elapsed_ms
 
 
@@ -145,6 +161,7 @@ def run_benchmark(models: list[str], base_url: str, warmup: bool) -> dict:
                     "generated_tokens": data.get("eval_count"),
                     "generation_ms": metric_ms(data, "eval_duration"),
                     "tokens_per_second": tokens_per_second(data),
+                    "done_reason": data.get("done_reason"),
                 }
                 print(f"[ok] {model} {case['id']} ({wall_ms:.0f} ms)")
             except OllamaRequestError as exc:
@@ -188,6 +205,7 @@ def run_benchmark(models: list[str], base_url: str, warmup: bool) -> dict:
             "temperature": TEMPERATURE,
             "top_p": TOP_P,
             "max_tokens": MAX_TOKENS,
+            "qwen3_thinking": False,
             "warmup_enabled": warmup,
             "timeout_seconds": TIMEOUT_SECONDS,
         },

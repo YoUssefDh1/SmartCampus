@@ -1,6 +1,8 @@
 import json
 from pathlib import Path
 
+import pytest
+
 from scripts import benchmark_llm
 
 
@@ -31,7 +33,43 @@ def test_benchmark_default_models_include_installed_candidates():
         "qwen3:4b",
         "minicpm-v:latest",
         "mistral:latest",
+        "qwen3:8b",
+        "llava:7b",
+        "phi:2.7b",
     ]
+
+
+@pytest.mark.parametrize(
+    ("model", "expect_thinking_disabled"),
+    [("qwen3:4b", True), ("qwen3:8b", True), ("gemma3:4b", False)],
+)
+def test_benchmark_disables_qwen3_thinking_only(monkeypatch, model, expect_thinking_disabled):
+    captured = {}
+
+    class FakeResponse:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args):
+            return None
+
+        def read(self):
+            return b'{"message":{"content":"answer"}}'
+
+    def fake_urlopen(request, timeout):
+        captured["payload"] = json.loads(request.data)
+        return FakeResponse()
+
+    monkeypatch.setattr(benchmark_llm, "urlopen", fake_urlopen)
+    benchmark_llm.request_chat(
+        "http://localhost:11434",
+        model,
+        [{"role": "user", "content": "Bonjour."}],
+    )
+
+    assert ("think" in captured["payload"]) is expect_thinking_disabled
+    if expect_thinking_disabled:
+        assert captured["payload"]["think"] is False
 
 
 def test_benchmark_runs_the_same_cases_for_each_model(monkeypatch):

@@ -24,6 +24,13 @@ def get_connection() -> psycopg.Connection:
     return psycopg.connect(_dsn(), autocommit=True)
 
 
+def get_dict_connection() -> psycopg.Connection:
+    """Open a PostgreSQL connection that returns rows keyed by column name."""
+    connection = get_connection()
+    connection.row_factory = dict_row
+    return connection
+
+
 def get_pool() -> ConnectionPool:
     """Pool shared by the API. Connections are in autocommit mode and return rows as dicts;
     services wrap their writes in `with conn.transaction():`."""
