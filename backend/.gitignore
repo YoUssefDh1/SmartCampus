@@ -3,4 +3,4 @@ __pycache__/
 .env
 *.pyc
 .pytest_cache/
-data/llm_eval/results/
+rapport_tests*.pdf
