@@ -26,10 +26,10 @@ def test_not_found_uses_error_format():
     assert err["code"] == "NOT_FOUND" and err["request_id"]
 
 
-def test_stub_returns_501_in_error_format():
+def test_chat_requires_authentication_before_validation():
     r = client.post("/api/v1/chat/message")
-    assert r.status_code == 501
-    assert r.json()["error"]["code"] == "NOT_IMPLEMENTED"
+    assert r.status_code == 401
+    assert r.json()["error"]["code"] == "UNAUTHORIZED"
 
 
 def test_business_error_and_unexpected_error():

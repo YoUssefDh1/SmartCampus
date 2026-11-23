@@ -5,6 +5,7 @@ node_modules/
 .next/
 __pycache__/
 *.pyc
+*.tsbuildinfo
 .pytest_cache/
 .DS_Store
 *.tsbuildinfo

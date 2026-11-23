@@ -1,5 +1,6 @@
 """Load the repository's repeatable demonstration data."""
 
+import json
 from pathlib import Path
 
 from app.db.migrate import _migration_files
@@ -11,11 +12,11 @@ PROJECT_ROOT = Path(__file__).resolve().parents[3]
 def main() -> None:
     seed_path = PROJECT_ROOT / "seed.sql"
     sql = seed_path.read_text(encoding="utf-8")
-    connection = get_connection()
+    connection = get_dict_connection()
     try:
         migration_table = connection.execute(
-            "SELECT to_regclass('public.smartcampus_schema_migrations')"
-        ).fetchone()[0]
+            "SELECT to_regclass('public.smartcampus_schema_migrations') AS migration_table"
+        ).fetchone()["migration_table"]
         if not migration_table:
             raise RuntimeError("Run `python -m app.db.migrate` before loading the seed.")
 
@@ -29,6 +30,8 @@ def main() -> None:
         with connection.transaction():
             connection.execute(sql, prepare=False)
         print("Demonstration seed applied.")
+
+        print(f"Demo users created: {seed_demo_users(connection)}.")
     finally:
         connection.close()
 
