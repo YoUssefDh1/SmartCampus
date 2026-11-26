@@ -5,5 +5,7 @@ The initial migration is the repository-root `schema.sql` file and is recorded a
 for example `002_add_example_column.sql`.
 
 Applied migration files are checksum-verified. Do not edit an applied migration; add a
-new migration instead. Migration scripts are run in a transaction and must not include
-their own `BEGIN` or `COMMIT` statements.
+new migration instead. Checksums normalize CRLF to LF so the same migration is stable
+across Windows and Unix; existing raw checksums remain accepted for compatibility.
+Migration scripts are run in a transaction and must not include their own `BEGIN` or
+`COMMIT` statements.

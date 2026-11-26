@@ -54,6 +54,10 @@ class Settings(BaseSettings):
     rag_top_k: int = Field(default=4, gt=0, le=20)
     rag_min_similarity: float = Field(default=0.25, ge=-1, le=1)
 
+    # Documents officiels
+    documents_storage_dir: str = "data/official_documents"
+    document_max_upload_bytes: int = Field(default=10 * 1024 * 1024, gt=0)
+
     @property
     def dev_auth_enabled(self) -> bool:
         return self.auth_dev_mode and self.environment == "development"
