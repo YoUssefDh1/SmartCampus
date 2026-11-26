@@ -6,9 +6,20 @@ import type { ApiErrorBody } from "@/types/api";
 
 export const API_URL = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000/api/v1";
 const TIMEOUT_MS = 15000;
+const DEFAULT_CHAT_TIMEOUT_MS = 130_000;
+export const CHAT_TIMEOUT_MS = (() => {
+  const configured = process.env.NEXT_PUBLIC_CHAT_TIMEOUT_MS;
+  if (configured === undefined) return DEFAULT_CHAT_TIMEOUT_MS;
+
+  const timeout = Number(configured);
+  if (!Number.isSafeInteger(timeout) || timeout <= 0) {
+    throw new Error("NEXT_PUBLIC_CHAT_TIMEOUT_MS must be a positive integer.");
+  }
+  return timeout;
+})();
 
 export type Query = Record<string, string | number | boolean | undefined | null>;
-interface Options { method?: string; body?: unknown; query?: Query; signal?: AbortSignal }
+interface Options { method?: string; body?: unknown; query?: Query; signal?: AbortSignal; timeoutMs?: number }
 
 // Appelé quand le backend répond 401 (ex. rediriger vers la connexion). Défini par l'application.
 let onUnauthorized: (() => void) | null = null;
@@ -26,7 +37,7 @@ export async function request<T>(path: string, opts: Options = {}): Promise<T> {
   else if (path.startsWith("/catalog")) headers["X-Dev-Role"] = devRoleStore.get(); // mode démo (voir devRole.ts)
 
   const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), TIMEOUT_MS);
+  const timer = setTimeout(() => controller.abort(), opts.timeoutMs ?? TIMEOUT_MS);
   opts.signal?.addEventListener("abort", () => controller.abort());
 
   let res: Response;

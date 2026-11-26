@@ -1,10 +1,10 @@
 // Fonctions d'accès aux APIs, groupées par domaine (mêmes noms que le backend, SA-5).
-import { request, type Query } from "./client";
+import { CHAT_TIMEOUT_MS, request, type Query } from "./client";
 import type {
   AdmissionRequirement, AdmissionRequirementInput, ChatRequest, ChatResponse, Curriculum, CurriculumDetail,
-  CurriculumInput, CurriculumSubjectInput, HealthResponse, Institution, Page, PaymentPlan, PaymentPlanInput, Program,
-  ProgramCurriculum, ProgramDetail, ProgramInput, PublicationStatus, Specialty, SpecialtyInput, Subject, SubjectInput,
-  TuitionFee, TuitionFeeInput,
+  ChatHistoryResponse, ChatSessionsResponse, CurriculumInput, CurriculumSubjectInput, HealthResponse, Institution,
+  Page, PaymentPlan, PaymentPlanInput, Program, ProgramCurriculum, ProgramDetail, ProgramInput, PublicationStatus,
+  Specialty, SpecialtyInput, Subject, SubjectInput, TuitionFee, TuitionFeeInput,
 } from "@/types/api";
 
 export const healthApi = {
@@ -76,12 +76,20 @@ export const catalogApi = {
 
 // ---------------------------------------------------------------------------
 export const chatApi = {
-  sendMessage: (body: ChatRequest) => request<ChatResponse>("/chat/message", { method: "POST", body }),
+  sessions: () => request<ChatSessionsResponse>("/chat/sessions"),
+  history: (sessionId: string) =>
+    request<ChatHistoryResponse>(`/chat/sessions/${encodeURIComponent(sessionId)}/history`),
+  sendMessage: (body: ChatRequest) =>
+    request<ChatResponse>("/chat/message", { method: "POST", body, timeoutMs: CHAT_TIMEOUT_MS }),
   sendAudio: (audio: Blob, sessionId?: string) => {
     const form = new FormData();
     form.append("audio", audio, "message.webm");
     if (sessionId) form.append("session_id", sessionId);
-    return request<ChatResponse & { transcript: string }>("/chat/audio", { method: "POST", body: form });
+    return request<ChatResponse & { transcript: string }>("/chat/audio", {
+      method: "POST",
+      body: form,
+      timeoutMs: CHAT_TIMEOUT_MS,
+    });
   },
 };
 
@@ -91,7 +99,13 @@ export const candidatesApi = {
 };
 
 export const authApi = {
-  guest: () => request<{ access_token: string }>("/auth/guest", { method: "POST" }),
+  guest: () => request<{
+    access_token: string;
+    token_type: string;
+    role: string;
+    session_id: string;
+    expires_at: string;
+  }>("/auth/guest", { method: "POST" }),
   login: (email: string, password: string) =>
     request<{ access_token: string }>("/auth/login", { method: "POST", body: { email, password } }),
 };

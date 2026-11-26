@@ -14,6 +14,10 @@ export interface ChatResponse {
   profile_updates: Record<string, unknown>;
   next_action: "ask_question" | "explain_program" | "compare_programs" | "start_preregistration" | "handover_human";
 }
+export interface ChatSessionSummary { id: string; status: string }
+export interface ChatHistoryMessage { id: string; role: "user" | "assistant" | "system"; content: string }
+export interface ChatHistoryResponse { id: string; messages: ChatHistoryMessage[] }
+export interface ChatSessionsResponse { items: ChatSessionSummary[]; total: number }
 
 // ---------------------------------------------------------------------------
 // Catalogue : vocabulaire identique à schema.sql + migration 002
