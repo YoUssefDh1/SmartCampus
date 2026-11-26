@@ -27,6 +27,20 @@ def _without_transaction_wrapper(sql: str) -> str:
     return re.sub(r"(?m)^\s*COMMIT\s*;\s*$", "", sql, count=1)
 
 
+def _migration_checksum(contents: bytes) -> str:
+    """Hash SQL independently of the checkout's Windows or Unix line endings."""
+    normalized = contents.replace(b"\r\n", b"\n")
+    return hashlib.sha256(normalized).hexdigest()
+
+
+def _matches_migration_checksum(contents: bytes, stored_checksum: str) -> bool:
+    # Older Windows runs stored the raw CRLF checksum. Continue accepting those records.
+    return stored_checksum in {
+        _migration_checksum(contents),
+        hashlib.sha256(contents).hexdigest(),
+    }
+
+
 def main() -> None:
     connection = get_connection()
     try:
@@ -42,14 +56,14 @@ def main() -> None:
 
         for version, path in _migration_files():
             contents = path.read_bytes()
-            checksum = hashlib.sha256(contents).hexdigest()
+            checksum = _migration_checksum(contents)
             applied = connection.execute(
                 "SELECT checksum FROM smartcampus_schema_migrations WHERE version = %s",
                 (version,),
             ).fetchone()
 
             if applied:
-                if applied[0].strip() != checksum:
+                if not _matches_migration_checksum(contents, applied[0].strip()):
                     raise RuntimeError(
                         f"Applied migration {version} was modified. "
                         "Add a new migration instead of editing it."

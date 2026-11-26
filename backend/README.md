@@ -54,6 +54,35 @@ Le dépôt n'inclut pas encore de corpus officiel IIT/ISB. Les fichiers de proje
 et les documents personnels ne doivent pas être ajoutés comme sources
 administratives.
 
+## Gestion des documents officiels
+
+Les modèles partagés par type de document sont dans
+[`backend/docs/document-templates/`](./docs/document-templates/). Ils restent
+hors du dossier d'ingestion RAG; n'ingérez que les copies complétées et vérifiées.
+
+Les routes `/api/v1/documents` sont réservées aux responsables IIT/ISB et à
+l'administration pour l'écriture; la direction peut consulter. Elles acceptent
+des fichiers PDF, Markdown et texte UTF-8. Un nouveau document est créé en
+brouillon; une nouvelle version importée reste inactive jusqu'à sa publication.
+Publiez une version avec
+`POST /api/v1/documents/{id}/versions/{version_id}/publish`; le retrait par
+`DELETE /api/v1/documents/{id}` est logique et conserve l'historique.
+
+Les fichiers sont stockés sur disque, tandis que PostgreSQL conserve les
+métadonnées et le chemin relatif du fichier. `DOCUMENTS_STORAGE_DIR` configure
+le répertoire (par défaut `backend/data/official_documents`) et
+`DOCUMENT_MAX_UPLOAD_BYTES` fixe la limite (10 Mio par défaut). Le répertoire
+est exclu de Git. Si plusieurs membres exécutent des backends séparés avec la
+même base, ils doivent aussi partager ce répertoire ou le monter depuis un
+stockage commun; la base seule ne transporte pas les fichiers.
+
+En mode développement, les écritures exigent un compte du personnel existant :
+utilisez un jeton de connexion ou `X-Dev-Role` avec `X-Dev-User-Id`.
+
+La gestion des fichiers par API n'alimente pas encore automatiquement le RAG.
+L'ingestion existante continue de lire `RAG_DOCUMENTS_DIR` via
+`python -m scripts.ingest_knowledge`.
+
 ## Évaluation comparative des modèles (SA-31–33)
 
 Le jeu d'évaluation et le barème sont dans `data/llm_eval/`. Pour exécuter les

@@ -24,7 +24,7 @@ TAGS = [
                                                    "paiement, conditions d'admission, publication et validité"},
     {"name": "Candidats", "description": "Dossier et profil d'orientation"},
     {"name": "Conversations", "description": "Chat texte et vocal, historique"},
-    {"name": "Documents", "description": "Pièces des candidats"},
+    {"name": "Documents", "description": "Documents officiels IIT/ISB : métadonnées, versions, publication et fichiers"},
     {"name": "Préinscriptions", "description": "Création et suivi des préinscriptions"},
     {"name": "QCM", "description": "QCM ciblé avant l'entretien"},
     {"name": "Rendez-vous", "description": "Planification des entretiens"},
