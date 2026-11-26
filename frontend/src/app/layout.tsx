@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 import Navbar from "@/components/Navbar";
+import FloatingChatWidget from "@/components/FloatingChatWidget";
 import "./globals.css";
 
 export const metadata: Metadata = {
@@ -13,6 +14,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
       <body>
         <Navbar />
         <main className="container">{children}</main>
+        <FloatingChatWidget />
       </body>
     </html>
   );
