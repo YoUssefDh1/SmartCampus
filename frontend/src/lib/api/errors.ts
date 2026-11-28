@@ -28,7 +28,7 @@ export class ApiError extends Error {
       case "DATABASE_UNAVAILABLE": return "La base de données est injoignable. Vérifiez que PostgreSQL est lancé.";
       case "NOT_IMPLEMENTED": return "Cette fonctionnalité n'est pas encore disponible.";
       case "AI_UNAVAILABLE": return "L'assistant est momentanément indisponible. Réessayez dans un instant.";
-      case "TOO_MANY_REQUESTS": return "Trop de messages envoyés. Patientez quelques secondes.";
+      case "TOO_MANY_REQUESTS": return this.message || "Limite de messages atteinte. Réessayez plus tard.";
       default: return this.message || "Une erreur est survenue.";
     }
   }

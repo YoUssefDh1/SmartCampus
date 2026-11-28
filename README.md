@@ -11,82 +11,83 @@ Plateforme agentique d'orientation universitaire (IIT / ISB) - Projet IA génér
     ├── schema.sql           Schéma initial versionné (tables, relations, fonctions)
     ├── seed.sql              Données de démonstration reproductibles
     ├── docker/init.sql      Active pgvector dans PostgreSQL
-    ├── docker-compose.yml   Base PostgreSQL + pgvector         -> localhost:5432
+    ├── docker-compose.yml   Stack complet : PostgreSQL, API et interface
     ├── .env.example         Variables de docker-compose
     └── README.md            Ce guide
 
 ## 2. Prérequis
 
-| Outil | Version | Vérifier | Obligatoire |
-|---|---|---|---|
-| Python | 3.11 ou plus | `python --version` | Oui |
-| Node.js | 20 ou plus | `node --version` | Oui |
-| Git | récent | `git --version` | Oui |
-| Docker Desktop | récent | `docker --version` | Pour la base de données (Membre 2) |
+- Git
+- Docker Desktop avec Docker Compose
+- Ollama installé et lancé sur l'ordinateur qui exécute Docker
 
-Le backend et le frontend démarrent **sans Docker**, mais le catalogue (`/programs`, `/catalog`, pages Formations
-et Catalogue) lit PostgreSQL : lancer la base (section 3.3) pour l'utiliser.
+Python et Node.js ne sont pas nécessaires pour lancer le projet avec Docker.
 
-## 3. Installation
+## 3. Lancer le projet avec Docker
 
-### 3.1 Backend
+### Première installation
 
-Windows (PowerShell) :
+Clonez le dépôt puis placez-vous dans son dossier :
 
-    cd backend
-    python -m venv .venv
-    .venv\Scripts\Activate.ps1
-    pip install -r requirements.txt
-    copy .env.example .env
+    git clone https://github.com/YoUssefDh1/SmartCampus.git
+    cd SmartCampus
 
-Linux / macOS :
+Téléchargez les deux modèles Ollama (une seule fois par ordinateur), puis lancez le projet depuis la racine :
 
-    cd backend
-    python -m venv .venv
-    source .venv/bin/activate
-    pip install -r requirements.txt
-    cp .env.example .env
-
-Si PowerShell refuse d'activer l'environnement :
-`Set-ExecutionPolicy -Scope CurrentUser RemoteSigned`, puis relancer.
-
-### 3.2 Frontend
-
-    cd frontend
-    npm install
-    copy .env.local.example .env.local      (Linux / macOS : cp .env.local.example .env.local)
-
-### 3.3 Base de données
-
-    copy .env.example .env                  (à la racine ; Linux / macOS : cp)
+    ollama pull mistral:latest
+    ollama pull nomic-embed-text
     docker compose up -d
-    docker compose ps                       (le service "db" doit être "healthy")
 
-Puis, depuis le dossier `backend` avec l'environnement Python activé :
+Docker construit automatiquement les images si elles ne sont pas encore présentes. Le backend applique les migrations, charge les données de démonstration et initialise l'index RAG au premier démarrage.
 
-    pip install -r requirements.txt
-    copy .env.example .env                  (Linux / macOS : cp .env.example .env)
-    python -m app.db.migrate
-    python -m app.db.seed
+### Après un `git pull`
 
-Les migrations SQL versionnées sont appliquées une seule fois et leur empreinte est vérifiée.
-Pour faire évoluer le schéma, ajouter un fichier SQL numéroté dans `backend/migrations/` ;
-ne pas modifier une migration déjà appliquée. Le seed est réexécutable sans ajouter de doublons.
-Le volume PostgreSQL reste local à chaque développeur et n'est pas commité.
+Depuis le dossier du projet, reconstruisez et redémarrez les conteneurs pour inclure les changements récupérés :
 
-## 4. Démarrage
+    git pull
+    docker compose up --build -d
 
-Ouvrir **deux terminaux**.
+Pour simplement redémarrer les conteneurs sans changement de code :
 
-Terminal 1 - Backend (dossier `backend`, environnement activé) :
+    docker compose up -d
 
-    uvicorn app.main:app --reload
+Vérifiez leur état :
 
-Terminal 2 - Frontend (dossier `frontend`) :
+    docker compose ps
 
-    npm run dev
+Attendez que `db` et `backend` soient `healthy`. L'interface est disponible ici :
 
-## 5. Vérifications
+| Service | URL |
+|---|---|
+| Base de données PostgreSQL + pgvector | `localhost:5432` |
+| Backend FastAPI (migrations, seed et index RAG automatiques) | `http://localhost:8000` |
+| Swagger Backend | `http://localhost:8000/docs` |
+| Santé Backend | `http://localhost:8000/api/v1/health` |
+| Frontend Next.js | `http://localhost:3000` |
+
+Arrêter le projet sans supprimer les données :
+
+    docker compose down
+
+Ne lancez pas `docker compose down -v` si vous voulez conserver l'historique du chat et l'index RAG dans PostgreSQL. Chaque ordinateur possède sa propre base locale.
+
+### Vérifier le RAG dans le chat
+
+1. Attendez que `docker compose ps` affiche `healthy` pour `backend`, puis vérifiez l'index :
+
+       docker compose exec db psql -U smartcampus -d smartcampus -c "SELECT count(*) FROM rag_chunks;"
+
+   Le résultat doit être supérieur à zéro (223 passages avec les documents fournis).
+2. Ouvrez `http://localhost:3000`, ouvrez le chat et demandez :
+   **« Quels sont les droits d'inscription à l'IIT pour les étudiants tunisiens et internationaux ? »**
+3. La réponse doit indiquer **800 DT** et **800 €**, et citer une source avec `[1]`.
+
+Si l'index est vide, consultez les journaux puis relancez l'ingestion :
+
+    docker compose logs backend --tail 50
+    docker compose exec backend python -m scripts.ingest_knowledge
+
+## 4. Vérifications
 
 | Adresse | Résultat attendu |
 |---|---|
@@ -97,26 +98,15 @@ Terminal 2 - Frontend (dossier `frontend`) :
 | http://localhost:3000/programs | Les 4 formations de démonstration, recherche et filtres |
 | http://localhost:3000/programs/{id} | Fiche : spécialités, admission, frais, modalités de paiement, programme |
 | http://localhost:3000/manager/catalog | Gestion du catalogue (mode démo : choisir le rôle en haut de page) |
-| http://localhost:3000/chat | Chat : l'envoi d'un message affiche « pas encore disponible » (normal) |
+| http://localhost:3000/chat | Chat IA avec réponses basées sur les sources RAG |
 
-Tests automatiques du backend : `python -m pytest -q` (dans `backend`, environnement activé).
+## 5. Configuration Docker (optionnelle)
 
-## 6. Paramètres de configuration
+Aucun fichier `.env` n'est nécessaire pour le lancement local : Compose utilise les valeurs par défaut de démonstration. Pour modifier l'utilisateur, le mot de passe, le nom ou le port publié de PostgreSQL, copiez `.env.example` à la racine en `.env`, puis modifiez ses valeurs. Le backend continue à joindre PostgreSQL sur le réseau Docker interne (`db:5432`).
 
-| Fichier | Variable | Valeur par défaut | Rôle |
-|---|---|---|---|
-| backend/.env | ENVIRONMENT | development | Environnement d'exécution |
-| backend/.env | CORS_ORIGINS | ["http://localhost:3000"] | Origines autorisées à appeler l'API |
-| backend/.env | DATABASE_URL | postgresql+psycopg://smartcampus:smartcampus@localhost:5432/smartcampus | Connexion PostgreSQL |
-| backend/.env | JWT_SECRET | change-me | Secret des jetons (à changer hors démo) |
-| backend/.env | ACCESS_TOKEN_MINUTES | 30 | Durée du jeton |
-| backend/.env | AUTH_DEV_MODE | true (exemple) | Mode démo : l'en-tête X-Dev-Role simule un rôle tant que /auth/login n'existe pas (ignoré hors development) |
-| frontend/.env.local | NEXT_PUBLIC_API_URL | http://localhost:8000/api/v1 | Adresse de l'API |
-| .env (racine) | POSTGRES_USER / PASSWORD / DB / PORT | smartcampus / smartcampus / smartcampus / 5432 | Base Docker |
+Ports utilisés par défaut : 3000 (interface), 8000 (API), 5432 (PostgreSQL).
 
-Ports utilisés : 3000 (frontend), 8000 (backend), 5432 (PostgreSQL).
-
-## 7. Données de démonstration
+## 6. Données de démonstration
 
 Dossier `data/demo/` (données fictives) :
 
@@ -128,21 +118,20 @@ Dossier `data/demo/` (données fictives) :
 | conversation_example.json | Conversation en français, tunisien et Arabizi | Tests du chatbot (Membre 5) |
 
 Le catalogue (formations, spécialités, programmes, matières, admission, frais, modalités de paiement) est
-chargé dans PostgreSQL par `python -m app.db.seed` (section « Catalogue de DEMONSTRATION » de `seed.sql`).
+chargé automatiquement dans PostgreSQL au démarrage du backend (section « Catalogue de DEMONSTRATION » de `seed.sql`).
 Les montants et conditions sont fictifs : à remplacer par les informations officielles.
 
-## 8. Problèmes fréquents
+## 7. Problèmes fréquents
 
 | Symptôme | Cause probable | Solution |
 |---|---|---|
-| Bandeau rouge « Impossible de joindre le serveur » | Backend arrêté | Lancer `uvicorn app.main:app --reload` |
-| Erreur CORS dans la console du navigateur | Frontend ouvert sur un autre port | Ajouter l'adresse dans CORS_ORIGINS (backend/.env) |
-| `Address already in use` | Port 8000 ou 3000 occupé | Fermer l'autre programme ou changer de port |
-| `uvicorn` introuvable | Environnement Python non activé | Activer `.venv` (section 3.1) |
+| Bandeau rouge « Impossible de joindre le serveur » | Backend arrêté ou en cours de démarrage | Vérifier `docker compose ps`, puis `docker compose logs backend --tail 50` |
+| Chat indique que l'assistant IA est indisponible | Ollama ou un modèle requis n'est pas prêt | Démarrer Ollama, vérifier `ollama list`, puis exécuter `ollama pull mistral:latest` et `ollama pull nomic-embed-text` |
+| Index RAG vide ou non initialisé | L'ingestion initiale n'a pas abouti | Vérifier les logs backend, puis lancer `docker compose exec backend python -m scripts.ingest_knowledge` |
 | `docker compose` échoue | Docker Desktop non lancé | Lancer Docker Desktop puis réessayer |
-| Port 5432 déjà utilisé | PostgreSQL local installé | Changer POSTGRES_PORT dans le `.env` racine et utiliser le même port dans `backend/.env` (`DATABASE_URL`) |
+| Port déjà utilisé | Un autre programme utilise le port 3000, 8000 ou 5432 | Arrêter l'autre programme ou modifier le port concerné dans le `.env` racine. Le port interne PostgreSQL reste `5432`. |
 
-## 9. Règles de travail en équipe
+## 8. Règles de travail en équipe
 
 - Branches : `main` (stable), `develop` (intégration), `feature/SA-xx-nom` (une par tâche).
 - Pull Request obligatoire vers `develop`, relue par un autre membre.
@@ -150,11 +139,11 @@ Les montants et conditions sont fictifs : à remplacer par les informations offi
 - Ne jamais versionner `.env`, `.env.local`, `.venv`, `node_modules`.
 - Contrat d'API : voir le document SA-5 ; Swagger (`/docs`) fait foi pour les routes déjà codées.
 
-## 10. Catalogue : formations, tarifs et conditions d'admission (SA-20 / SA-21)
+## 9. Catalogue : formations, tarifs et conditions d'admission (SA-20 / SA-21)
 
 ### Base de données
-La migration `backend/migrations/002_catalog_publication_payment.sql` (appliquée par `python -m app.db.migrate`)
-complète le schéma sans le modifier :
+La migration `backend/migrations/002_catalog_publication_payment.sql` est appliquée automatiquement au démarrage
+du backend Docker et complète le schéma sans le modifier :
 
 | Ajout | Rôle |
 |---|---|
@@ -195,5 +184,8 @@ Utiliser `programs_service.get_program_detail(conn, program_id)` ou les fonction
 `admission_requirement`, `payment_plan` directement (elles contiennent les brouillons).
 
 ### Tests
-`python -m pytest -q` (dans `backend`) : les tests du catalogue utilisent la base de `DATABASE_URL`
-(migrée et seedée) et sont ignorés si elle est injoignable.
+Après avoir lancé le stack Docker, exécutez les tests backend avec :
+
+    docker compose exec backend python -m pytest -q
+
+Les tests du catalogue utilisent la base Docker migrée et seedée.

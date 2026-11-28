@@ -19,7 +19,7 @@ const WELCOME_MESSAGE =
 
 function isRetryable(error: unknown): boolean {
   return !(error instanceof ApiError) || error.status === 0 || error.status === 408
-    || error.status === 429 || error.status >= 500;
+    || error.status >= 500;
 }
 
 export default function ChatBox({

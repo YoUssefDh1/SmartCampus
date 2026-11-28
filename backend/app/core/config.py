@@ -32,8 +32,8 @@ class Settings(BaseSettings):
 
     # Sessions visiteur
     guest_session_ttl_hours: int = Field(default=24, gt=0)
-    guest_max_messages: int = Field(default=20, gt=0)
-    guest_rate_limit_per_minute: int = Field(default=5, gt=0)
+    guest_max_messages: int = Field(default=100, gt=0)
+    guest_rate_limit_per_minute: int = Field(default=10, gt=0)
     guest_purge_interval_minutes: int = Field(default=60, gt=0)
 
     # Mémoire conversationnelle

@@ -1,5 +1,10 @@
-# Services associés en local : base PostgreSQL avec pgvector.
-# Le backend et le frontend se lancent directement sur la machine (voir README.md).
+# SmartCampus AI - tout le stack en une commande :
+#   docker compose up -d
+#
+# Services : PostgreSQL/pgvector (db), API FastAPI (backend), Next.js (frontend).
+# Les variables sensibles se definissent dans .env a la racine (copie de .env.example).
+# Les valeurs par defaut ci-dessous permettent de lancer sans creer de .env.
+
 services:
   db:
     image: pgvector/pgvector:pg16
@@ -18,6 +23,73 @@ services:
       interval: 5s
       timeout: 3s
       retries: 10
+    restart: unless-stopped
+
+  backend:
+    build: ./backend
+    container_name: smartcampus-backend
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-smartcampus}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-smartcampus}
+      POSTGRES_DB: ${POSTGRES_DB:-smartcampus}
+      DATABASE_URL: "postgresql+psycopg://${POSTGRES_USER:-smartcampus}:${POSTGRES_PASSWORD:-smartcampus}@db:5432/${POSTGRES_DB:-smartcampus}"
+      ENVIRONMENT: development
+      CORS_ORIGINS: '["http://localhost:3000"]'
+      JWT_SECRET: ${JWT_SECRET:-change-me-in-production}
+      ACCESS_TOKEN_MINUTES: 30
+      AUTH_DEV_MODE: "true"
+      REFRESH_TOKEN_DAYS: 7
+      PASSWORD_MIN_LENGTH: 8
+      GUEST_SESSION_TTL_HOURS: 24
+      GUEST_MAX_MESSAGES: 100
+      GUEST_RATE_LIMIT_PER_MINUTE: 10
+      GUEST_PURGE_INTERVAL_MINUTES: 60
+      MEMORY_WINDOW_SIZE: 10
+      MAX_MESSAGE_LENGTH: 2000
+      LLM_BASE_URL: http://host.docker.internal:11434
+      LLM_MODEL: mistral:latest
+      LLM_TIMEOUT_SECONDS: 120
+      LLM_MAX_TOKENS: 600
+      LLM_TEMPERATURE: 0.2
+      RAG_ENABLED: "true"
+      RAG_EMBEDDING_MODEL: nomic-embed-text
+      RAG_DOCUMENTS_DIR: /app/data/knowledge_base
+      RAG_TOP_K: 4
+      RAG_MIN_SIMILARITY: 0.25
+    ports:
+      - "8000:8000"
+    volumes:
+      - ./schema.sql:/schema.sql:ro
+      - ./seed.sql:/seed.sql:ro
+      - ./data/demo/users.json:/data/demo/users.json:ro
+      - ./backend/data/knowledge_base:/app/data/knowledge_base:ro
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://127.0.0.1:8000/api/v1/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 15
+      start_period: 60s
+    restart: unless-stopped
+
+  frontend:
+    build:
+      context: ./frontend
+      args:
+        NEXT_PUBLIC_API_URL: http://localhost:8000/api/v1
+    container_name: smartcampus-frontend
+    depends_on:
+      backend:
+        condition: service_healthy
+    environment:
+      NEXT_PUBLIC_API_URL: http://localhost:8000/api/v1
+    ports:
+      - "3000:3000"
+    restart: unless-stopped
 
 volumes:
   pgdata:

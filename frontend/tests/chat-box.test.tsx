@@ -109,3 +109,60 @@ it("offers retry after a transient send failure without duplicating the user bub
   expect(api.guest).toHaveBeenCalledTimes(1);
   expect(api.sendMessage).toHaveBeenCalledTimes(2);
 });
+
+it("explains the message cooldown without offering an immediate retry", async () => {
+  api.guest.mockResolvedValue({
+    access_token: "guest-token",
+    token_type: "bearer",
+    role: "guest",
+    session_id: "guest-1",
+    expires_at: "2026-11-27T00:00:00Z",
+  });
+  api.sendMessage.mockRejectedValue(
+    new ApiError(
+      429,
+      "TOO_MANY_REQUESTS",
+      "Débit de messages invité dépassé (limite : 10 messages par minute). Veuillez ralentir.",
+    ),
+  );
+
+  render(<ChatBox />);
+
+  const input = screen.getByRole("textbox", { name: "Message" });
+  await waitFor(() => expect(input.hasAttribute("disabled")).toBe(false));
+  fireEvent.change(input, { target: { value: "Bonjour" } });
+  fireEvent.click(screen.getByRole("button", { name: "Envoyer" }));
+
+  expect(await screen.findByText(
+    "Débit de messages invité dépassé (limite : 10 messages par minute). Veuillez ralentir. (TOO_MANY_REQUESTS)",
+  )).toBeTruthy();
+  expect(screen.queryByRole("button", { name: "Réessayer" })).toBeNull();
+});
+
+it("shows when the guest conversation quota requires account registration", async () => {
+  api.guest.mockResolvedValue({
+    access_token: "guest-token",
+    token_type: "bearer",
+    role: "guest",
+    session_id: "guest-1",
+    expires_at: "2026-11-27T00:00:00Z",
+  });
+  api.sendMessage.mockRejectedValue(
+    new ApiError(
+      429,
+      "TOO_MANY_REQUESTS",
+      "Quota de messages invité dépassé (limite : 100 messages). Veuillez créer un compte pour continuer.",
+    ),
+  );
+
+  render(<ChatBox />);
+
+  const input = screen.getByRole("textbox", { name: "Message" });
+  await waitFor(() => expect(input.hasAttribute("disabled")).toBe(false));
+  fireEvent.change(input, { target: { value: "Bonjour" } });
+  fireEvent.click(screen.getByRole("button", { name: "Envoyer" }));
+
+  expect(await screen.findByText(
+    "Quota de messages invité dépassé (limite : 100 messages). Veuillez créer un compte pour continuer. (TOO_MANY_REQUESTS)",
+  )).toBeTruthy();
+});

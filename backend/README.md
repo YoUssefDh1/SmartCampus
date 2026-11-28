@@ -24,8 +24,12 @@ modèle à comparer :
 Configurez `LLM_MODEL` dans `backend/.env` pour le modèle installé, par exemple
 `gemma3:4b` ou `qwen3:8b`. Le backend appelle l'API Ollama locale à
 `http://localhost:11434`; modifiez `LLM_BASE_URL` si Ollama tourne ailleurs.
-Les sessions sont actuellement conservées en mémoire et seront perdues au
-redémarrage du backend. Les appels au modèle nécessitent qu'Ollama soit lancé.
+Les conversations sont enregistrées dans PostgreSQL et peuvent être restaurées
+dans le navigateur tant que la session visiteur (24 heures et 100 messages par
+défaut) et ses données locales sont conservées. Avec Docker Compose, le volume
+`pgdata` conserve la base après un redémarrage ou `docker compose down` ; ne
+supprimez pas ce volume si vous souhaitez garder l'historique. Les appels au
+modèle nécessitent qu'Ollama soit lancé.
 
 ## RAG sur les sources officielles IIT/ISB
 
@@ -43,12 +47,20 @@ Puis depuis `backend/`, lancez Ollama et ingérez les sources :
     python -m scripts.ingest_knowledge
 
 Activez ensuite `RAG_ENABLED=true` dans `backend/.env` et redémarrez l'API.
+Avec Docker Compose, l'index est créé automatiquement au démarrage du backend
+s'il n'existe pas encore et si `RAG_ENABLED=true`.
 `RAG_EMBEDDING_MODEL` choisit le modèle d'embeddings; `LLM_MODEL` reste libre
 pour Gemma, Qwen ou un autre modèle Ollama. L'ingestion crée/actualise la table
 pgvector `rag_chunks`. Si le RAG est activé sans base ou sans passages pertinents,
 le backend signale l'indisponibilité ou demande une confirmation officielle au
 lieu d'inventer une réponse. Après avoir changé `RAG_EMBEDDING_MODEL`, réingérez
 tous les documents afin que les vecteurs de la base correspondent au modèle.
+
+Pour vérifier l'intégration depuis l'interface, demandez dans le chat :
+« Quels sont les droits d'inscription à l'IIT pour les étudiants tunisiens et
+internationaux ? » La réponse doit citer une source avec `[1]` et indiquer les
+montants présents dans le document officiel indexé. La réponse API inclut aussi
+les documents récupérés dans `sources`.
 
 
 
