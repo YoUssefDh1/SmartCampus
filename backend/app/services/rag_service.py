@@ -13,7 +13,36 @@ from app.services.embedding_service import embed_texts
 CHUNK_SIZE = 1200
 CHUNK_OVERLAP = 180
 EMBEDDING_BATCH_SIZE = 16
+RERANK_CANDIDATE_MULTIPLIER = 5
+MIN_RERANK_CANDIDATES = 20
+MAX_RERANK_CANDIDATES = 100
+LEXICAL_RERANK_WEIGHT = 0.1
+TITLE_RERANK_WEIGHT = 0.25
 SUPPORTED_SUFFIXES = {".pdf", ".md", ".txt"}
+_RERANK_STOPWORDS = frozenset(
+    "a an and are as at au aux avec ce ces dans de des du elle en est et for from "
+    "how i il in is it la le les of on or ou par pour que quelle quelles quel quels "
+    "qui sur the this to un une was what when where which who with".split()
+)
+_SOURCE_TYPE_LABELS = {
+    "admission": "Admission",
+    "brochure": "Brochure",
+    "curriculum": "Plan d'études",
+}
+_SOURCE_WORD_LABELS = {
+    "cybersecurite": "Cybersécurité",
+    "donnees": "Données",
+    "embarques": "Embarqués",
+    "energies": "Énergies",
+    "genie": "Génie",
+    "informatique": "Informatique",
+    "ingenieur": "Ingénieur",
+    "mecanique": "Mécanique",
+    "preparatoire": "Préparatoire",
+    "procedes": "Procédés",
+    "reseaux": "Réseaux",
+    "systemes": "Systèmes",
+}
 
 
 @dataclass(frozen=True)
@@ -117,11 +146,70 @@ def _vector_literal(vector: list[float]) -> str:
     return "[" + ",".join(format(value, ".8g") for value in vector) + "]"
 
 
-def _initialize_schema(settings: Settings) -> None:
+def _lexical_terms(text: str) -> set[str]:
+    terms = set()
+    for token in re.findall(r"[^\W_]+", text.casefold()):
+        if len(token) <= 2 or token in _RERANK_STOPWORDS:
+            continue
+        if len(token) > 4 and token.endswith("s"):
+            token = token[:-1]
+        terms.add(token)
+    return terms
+
+
+def _humanize_source_title(title: str) -> str:
+    parts = title.casefold().split("-")
+    if len(parts) < 3 or parts[0] not in {"iit", "isb"}:
+        return title
+
+    source_type = _SOURCE_TYPE_LABELS.get(parts[-1])
+    if source_type is None:
+        return title
+
+    program_name = " ".join(
+        _SOURCE_WORD_LABELS.get(word, word.capitalize())
+        for word in parts[1:-1]
+    )
+    return f"{source_type} — {program_name} ({parts[0].upper()})"
+
+
+def _rerank_chunks(
+    query: str,
+    chunks: list[RetrievedChunk],
+    top_k: int,
+) -> list[RetrievedChunk]:
+    query_terms = _lexical_terms(query)
+    if not query_terms:
+        return chunks[:top_k]
+
+    def rank_key(chunk: RetrievedChunk) -> tuple[float, float, str, int]:
+        title_terms = _lexical_terms(f"{chunk.title} {chunk.origin}")
+        chunk_terms = _lexical_terms(chunk.content)
+        lexical_coverage = len(query_terms & chunk_terms) / len(query_terms)
+        title_coverage = len(query_terms & title_terms) / len(query_terms)
+        combined_score = (
+            chunk.similarity
+            + LEXICAL_RERANK_WEIGHT * lexical_coverage
+            + TITLE_RERANK_WEIGHT * title_coverage
+        )
+        return (
+            -combined_score,
+            -chunk.similarity,
+            chunk.origin,
+            chunk.page or 0,
+        )
+
+    return sorted(chunks, key=rank_key)[:top_k]
+
+
+def _initialize_schema(settings: Settings, embedding_dimensions: int) -> None:
+    if not 1 <= embedding_dimensions <= 16000:
+        raise ValueError("Embedding dimensions must be between 1 and 16000.")
+
     with psycopg.connect(_database_url(settings)) as connection:
         connection.execute("CREATE EXTENSION IF NOT EXISTS vector")
         connection.execute(
-            """
+            f"""
             CREATE TABLE IF NOT EXISTS rag_chunks (
                 source_id TEXT PRIMARY KEY,
                 source_path TEXT NOT NULL,
@@ -130,7 +218,7 @@ def _initialize_schema(settings: Settings) -> None:
                 chunk_index INTEGER NOT NULL,
                 content TEXT NOT NULL,
                 embedding_model TEXT NOT NULL,
-                embedding vector NOT NULL,
+                embedding vector({embedding_dimensions}) NOT NULL,
                 UNIQUE (source_path, page, chunk_index)
             )
             """
@@ -138,12 +226,36 @@ def _initialize_schema(settings: Settings) -> None:
         connection.execute(
             "ALTER TABLE rag_chunks ADD COLUMN IF NOT EXISTS embedding_model TEXT"
         )
-        connection.execute(
+        embedding_type = connection.execute(
             """
-            CREATE INDEX IF NOT EXISTS rag_chunks_embedding_idx
-            ON rag_chunks USING hnsw (embedding vector_cosine_ops)
+            SELECT format_type(attribute.atttypid, attribute.atttypmod)
+            FROM pg_attribute AS attribute
+            WHERE attribute.attrelid = 'public.rag_chunks'::regclass
+              AND attribute.attname = 'embedding'
+              AND NOT attribute.attisdropped
             """
-        )
+        ).fetchone()[0]
+        expected_type = f"vector({embedding_dimensions})"
+        if embedding_type == "vector":
+            connection.execute(
+                f"""
+                ALTER TABLE rag_chunks
+                ALTER COLUMN embedding TYPE {expected_type}
+                USING embedding::{expected_type}
+                """
+            )
+        elif embedding_type != expected_type:
+            raise ValueError(
+                f"rag_chunks uses {embedding_type}, but the configured embedding model "
+                f"produces {expected_type}. Rebuild the RAG index before changing embedding models."
+            )
+        if embedding_dimensions <= 2000:
+            connection.execute(
+                """
+                CREATE INDEX IF NOT EXISTS rag_chunks_embedding_idx
+                ON rag_chunks USING hnsw (embedding vector_cosine_ops)
+                """
+            )
 
 
 def _store_document_chunks(
@@ -155,28 +267,29 @@ def _store_document_chunks(
     with psycopg.connect(_database_url(settings)) as connection:
         with connection.transaction():
             connection.execute("DELETE FROM rag_chunks WHERE source_path = %s", (source_path,))
-            connection.executemany(
-                """
-                INSERT INTO rag_chunks
-                    (source_id, source_path, title, page, chunk_index, content, embedding_model, embedding)
-                VALUES (%s, %s, %s, %s, %s, %s, %s, %s::vector)
-                """,
-                [
-                    (
-                        hashlib.sha256(
-                            f"{chunk.source_path}:{chunk.page}:{chunk.chunk_index}".encode("utf-8")
-                        ).hexdigest(),
-                        chunk.source_path,
-                        chunk.title,
-                        chunk.page,
-                        chunk.chunk_index,
-                        chunk.content,
-                        settings.rag_embedding_model,
-                        _vector_literal(embedding),
-                    )
-                    for chunk, embedding in zip(chunks, embeddings, strict=True)
-                ],
-            )
+            with connection.cursor() as cursor:
+                cursor.executemany(
+                    """
+                    INSERT INTO rag_chunks
+                        (source_id, source_path, title, page, chunk_index, content, embedding_model, embedding)
+                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s::vector)
+                    """,
+                    [
+                        (
+                            hashlib.sha256(
+                                f"{chunk.source_path}:{chunk.page}:{chunk.chunk_index}".encode("utf-8")
+                            ).hexdigest(),
+                            chunk.source_path,
+                            chunk.title,
+                            chunk.page,
+                            chunk.chunk_index,
+                            chunk.content,
+                            settings.rag_embedding_model,
+                            _vector_literal(embedding),
+                        )
+                        for chunk, embedding in zip(chunks, embeddings, strict=True)
+                    ],
+                )
 
 
 async def ingest_documents(*, settings: Settings | None = None) -> int:
@@ -185,13 +298,13 @@ async def ingest_documents(*, settings: Settings | None = None) -> int:
     if not root.is_dir():
         raise FileNotFoundError(f"Knowledge-base folder does not exist: {root}")
     chunks = _document_chunks(root)
-    await asyncio.to_thread(_initialize_schema, config)
 
     grouped: dict[str, list[DocumentChunk]] = {}
     for chunk in chunks:
         grouped.setdefault(chunk.source_path, []).append(chunk)
 
     stored_count = 0
+    embedding_dimensions: int | None = None
     for source_path, document_chunks in grouped.items():
         document_embeddings = []
         for start in range(0, len(document_chunks), EMBEDDING_BATCH_SIZE):
@@ -202,6 +315,15 @@ async def ingest_documents(*, settings: Settings | None = None) -> int:
             )
             if len(embeddings) != len(batch):
                 raise AIUnavailableError("Le nombre de vecteurs ne correspond pas au nombre de passages.")
+            batch_dimensions = {len(embedding) for embedding in embeddings}
+            if len(batch_dimensions) != 1:
+                raise AIUnavailableError("Le modèle a renvoyé des vecteurs de dimensions différentes.")
+            current_dimensions = batch_dimensions.pop()
+            if embedding_dimensions is None:
+                embedding_dimensions = current_dimensions
+                await asyncio.to_thread(_initialize_schema, config, embedding_dimensions)
+            elif current_dimensions != embedding_dimensions:
+                raise AIUnavailableError("La dimension des vecteurs a changé pendant l'ingestion.")
             document_embeddings.extend(embeddings)
         await asyncio.to_thread(
             _store_document_chunks,
@@ -216,11 +338,16 @@ async def ingest_documents(*, settings: Settings | None = None) -> int:
 
 def _search(
     vector: list[float],
+    query: str,
     top_k: int,
     min_similarity: float,
     settings: Settings,
 ) -> list[RetrievedChunk]:
     literal = _vector_literal(vector)
+    candidate_limit = min(
+        max(top_k * RERANK_CANDIDATE_MULTIPLIER, MIN_RERANK_CANDIDATES),
+        MAX_RERANK_CANDIDATES,
+    )
     with psycopg.connect(_database_url(settings)) as connection:
         rows = connection.execute(
             """
@@ -238,13 +365,13 @@ def _search(
                 literal,
                 min_similarity,
                 literal,
-                top_k,
+                candidate_limit,
             ),
         ).fetchall()
-    return [
+    candidates = [
         RetrievedChunk(
             source_id=row[0],
-            title=row[1],
+            title=_humanize_source_title(row[1]),
             origin=row[2],
             page=row[3] or None,
             content=row[4],
@@ -252,6 +379,7 @@ def _search(
         )
         for row in rows
     ]
+    return _rerank_chunks(query, candidates, top_k)
 
 
 async def retrieve(
@@ -265,6 +393,7 @@ async def retrieve(
         return await asyncio.to_thread(
             _search,
             embeddings[0],
+            query,
             config.rag_top_k,
             config.rag_min_similarity,
             config,

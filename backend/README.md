@@ -50,9 +50,7 @@ le backend signale l'indisponibilité ou demande une confirmation officielle au
 lieu d'inventer une réponse. Après avoir changé `RAG_EMBEDDING_MODEL`, réingérez
 tous les documents afin que les vecteurs de la base correspondent au modèle.
 
-Le dépôt n'inclut pas encore de corpus officiel IIT/ISB. Les fichiers de projet
-et les documents personnels ne doivent pas être ajoutés comme sources
-administratives.
+
 
 ## Gestion des documents officiels
 
