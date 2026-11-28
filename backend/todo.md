@@ -77,7 +77,7 @@ be improved. Ollama is the model runner; Gemma and Qwen are the models.
 - [ ] Ask the project owner for the approved, current IIT/ISB source documents.
       Do not use project specifications or candidate records as admissions
       sources.
-- [ ] Put approved, text-searchable PDF, Markdown, or UTF-8 text files in
+- [ ] Put approved PDF, DOCX, Markdown, or UTF-8 text files in
       `backend/data/knowledge_base/`.
 - [ ] From the repository root, start PostgreSQL:
 
@@ -86,7 +86,7 @@ be improved. Ollama is the model runner; Gemma and Qwen are the models.
 - [ ] In another terminal, pull the embedding model and ingest the documents
       from `backend/`:
 
-      ollama pull nomic-embed-text
+      ollama pull nomic-embed-text-v2-moe
       python -m scripts.ingest_knowledge
 
 - [ ] Set `RAG_ENABLED=true` in `backend/.env`, restart the backend, and ask a

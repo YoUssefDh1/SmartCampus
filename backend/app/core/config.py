@@ -49,7 +49,7 @@ class Settings(BaseSettings):
 
     # Retrieval-augmented generation
     rag_enabled: bool = False
-    rag_embedding_model: str = "nomic-embed-text"
+    rag_embedding_model: str = "nomic-embed-text-v2-moe"
     rag_documents_dir: str = "data/knowledge_base"
     rag_top_k: int = Field(default=4, gt=0, le=20)
     rag_min_similarity: float = Field(default=0.25, ge=-1, le=1)

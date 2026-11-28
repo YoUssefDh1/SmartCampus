@@ -15,6 +15,7 @@ from app.core.errors import FileTooLargeError, NotFoundError, UnprocessableError
 
 MIME_TYPES = {
     ".pdf": "application/pdf",
+    ".docx": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
     ".md": "text/markdown",
     ".txt": "text/plain",
 }
@@ -45,7 +46,9 @@ def _clean_filename(filename: str | None) -> tuple[str, str]:
     basename = "".join(char for char in basename if ord(char) >= 32 and ord(char) != 127).strip(" .")
     suffix = PureWindowsPath(basename).suffix.lower()
     if suffix not in MIME_TYPES:
-        raise UnsupportedMediaTypeError("Formats acceptés : PDF, Markdown (.md) et texte UTF-8 (.txt).")
+        raise UnsupportedMediaTypeError(
+            "Formats acceptés : PDF, DOCX, Markdown (.md) et texte UTF-8 (.txt)."
+        )
     if not basename:
         raise UnprocessableError("Le nom du fichier est invalide.")
     if len(basename) > 255:

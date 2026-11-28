@@ -20,14 +20,14 @@ def test_embed_texts_uses_configured_embedding_model():
         ["first", "second"],
         settings=Settings(
             llm_base_url="http://localhost:11434/",
-            rag_embedding_model="nomic-embed-text",
+            rag_embedding_model="nomic-embed-text-v2-moe",
         ),
         transport=httpx.MockTransport(handler),
     ))
 
     assert result == [[0.1, 0.2], [0.3, 0.4]]
     assert captured["url"] == "http://localhost:11434/api/embed"
-    assert b'"model":"nomic-embed-text"' in captured["body"]
+    assert b'"model":"nomic-embed-text-v2-moe"' in captured["body"]
 
 
 def test_embed_texts_reports_incomplete_vectors():

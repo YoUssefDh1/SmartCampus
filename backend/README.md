@@ -39,7 +39,7 @@ Depuis la racine du dépôt, lancez PostgreSQL :
 
 Puis depuis `backend/`, lancez Ollama et ingérez les sources :
 
-    ollama pull nomic-embed-text
+    ollama pull nomic-embed-text-v2-moe
     python -m scripts.ingest_knowledge
 
 Activez ensuite `RAG_ENABLED=true` dans `backend/.env` et redémarrez l'API.
@@ -49,6 +49,11 @@ pgvector `rag_chunks`. Si le RAG est activé sans base ou sans passages pertinen
 le backend signale l'indisponibilité ou demande une confirmation officielle au
 lieu d'inventer une réponse. Après avoir changé `RAG_EMBEDDING_MODEL`, réingérez
 tous les documents afin que les vecteurs de la base correspondent au modèle.
+Le modèle par défaut `nomic-embed-text-v2-moe` est multilingue et prend en
+charge le français. Les embeddings de requête et de document utilisent ses
+préfixes de tâche recommandés. Les passages font au plus 1 200 caractères,
+privilégient les limites de phrases et de paragraphes, gardent les titres
+Markdown avec leur texte, et se chevauchent jusqu'à 90 caractères.
 
 
 
@@ -60,8 +65,8 @@ hors du dossier d'ingestion RAG; n'ingérez que les copies complétées et véri
 
 Les routes `/api/v1/documents` sont réservées aux responsables IIT/ISB et à
 l'administration pour l'écriture; la direction peut consulter. Elles acceptent
-des fichiers PDF, Markdown et texte UTF-8. Un nouveau document est créé en
-brouillon; une nouvelle version importée reste inactive jusqu'à sa publication.
+des fichiers PDF, DOCX, Markdown et texte UTF-8. Un nouveau document est créé
+en brouillon; une nouvelle version importée reste inactive jusqu'à sa publication.
 Publiez une version avec
 `POST /api/v1/documents/{id}/versions/{version_id}/publish`; le retrait par
 `DELETE /api/v1/documents/{id}` est logique et conserve l'historique.
@@ -77,9 +82,17 @@ stockage commun; la base seule ne transporte pas les fichiers.
 En mode développement, les écritures exigent un compte du personnel existant :
 utilisez un jeton de connexion ou `X-Dev-Role` avec `X-Dev-User-Id`.
 
-La gestion des fichiers par API n'alimente pas encore automatiquement le RAG.
-L'ingestion existante continue de lire `RAG_DOCUMENTS_DIR` via
-`python -m scripts.ingest_knowledge`.
+Après publication d'une version, lancez `python -m scripts.ingest_knowledge`
+depuis `backend/` pour ajouter au RAG les versions actives des documents gérés
+par l'API ainsi que les sources vérifiées de `RAG_DOCUMENTS_DIR`. Les brouillons
+ne sont pas indexés. La recherche vérifie aussi que chaque passage correspond
+toujours à la version active du document; un document retiré ou remplacé cesse
+donc d'être retourné même avant la prochaine ingestion. Les documents actifs
+sont accessibles à tous les utilisateurs du chatbot, y compris les invités :
+n'activez que des documents approuvés pour une diffusion publique.
+L'extraction DOCX conserve les paragraphes de titre Word et le contenu des
+tableaux. Pour les PDF, les pages sans texte sélectionnable provoquent un
+message indiquant les pages à vérifier (par exemple, pages scannées à OCRiser).
 
 ## Évaluation comparative des modèles (SA-31–33)
 

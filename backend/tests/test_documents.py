@@ -1,10 +1,14 @@
 """Staff-managed official document uploads, versions, publication, and access scope."""
 
+import asyncio
+from io import BytesIO
 import uuid
 
 import pytest
+from docx import Document as WordDocument
 
 from app.core.config import get_settings
+from app.services import rag_service
 from app.services import document_storage
 from tests.helpers import API, IIT, ISB, make_program
 
@@ -194,3 +198,95 @@ def test_document_upload_rejects_unsupported_invalid_and_oversized_files(client,
     assert oversized.status_code == 413
     assert client.get(f"{API}/documents", headers=context["headers"]).json()["total"] == 0
     assert not [path for path in context["storage"].rglob("*") if path.is_file()]
+
+
+def test_rag_returns_only_published_current_document_versions(
+    client, document_context, tmp_path, monkeypatch
+):
+    context = document_context
+    knowledge_base = tmp_path / "knowledge_base"
+    knowledge_base.mkdir()
+    (knowledge_base / "baseline.txt").write_text("General public reference.", encoding="utf-8")
+
+    storage_settings = get_settings().model_copy(update={
+        "documents_storage_dir": str(context["storage"]),
+        "document_max_upload_bytes": 1_000_000,
+    })
+    monkeypatch.setattr(document_storage, "get_settings", lambda: storage_settings)
+    docx = WordDocument()
+    docx.add_heading("Observatory publication", level=1)
+    docx.add_paragraph("Published sentinel information for the observatory.")
+    docx_file = BytesIO()
+    docx.save(docx_file)
+    published = upload_document(
+        client,
+        context,
+        filename="published-only.docx",
+        content=docx_file.getvalue(),
+    ).json()
+    draft = upload_document(
+        client,
+        context,
+        filename="draft-only.txt",
+        content=b"Draft sentinel information for the observatory.",
+    ).json()
+    published_version = context["db"].execute(
+        "SELECT current_version_id FROM document_source WHERE id = %s",
+        (published["id"],),
+    ).fetchone()[0]
+    publication = client.post(
+        f"{API}/documents/{published['id']}/versions/{published_version}/publish",
+        headers=context["headers"],
+    )
+    assert publication.status_code == 200, publication.text
+
+    async def fake_embeddings(texts, *, settings):
+        return [[1.0, *([0.0] * 767)] for _ in texts]
+
+    monkeypatch.setattr(rag_service, "embed_texts", fake_embeddings)
+    settings = get_settings().model_copy(update={
+        "documents_storage_dir": str(context["storage"]),
+        "rag_documents_dir": str(knowledge_base),
+        "rag_top_k": 10,
+        "rag_min_similarity": -1,
+    })
+    document_ids = (uuid.UUID(published["id"]), uuid.UUID(draft["id"]))
+    try:
+        asyncio.run(rag_service.ingest_documents(settings=settings))
+
+        results = asyncio.run(
+            rag_service.retrieve("observatory sentinel information", settings=settings)
+        )
+        assert any(
+            result.origin == "published-only.docx"
+            and "# Observatory publication" in result.content
+            and "Published sentinel information" in result.content
+            for result in results
+        )
+        assert all(result.origin != "draft-only.txt" for result in results)
+
+        context["db"].execute(
+            "UPDATE document_source SET status = 'deleted', deleted_at = now() WHERE id = %s",
+            (published["id"],),
+        )
+        results_after_removal = asyncio.run(
+            rag_service.retrieve("observatory sentinel information", settings=settings)
+        )
+        assert all(result.origin != "published-only.docx" for result in results_after_removal)
+    finally:
+        has_document_id = context["db"].execute(
+            """
+            SELECT EXISTS (
+                SELECT 1
+                FROM information_schema.columns
+                WHERE table_schema = 'public'
+                  AND table_name = 'rag_chunks'
+                  AND column_name = 'document_id'
+            )
+            """
+        ).fetchone()[0]
+        if has_document_id:
+            context["db"].execute(
+                "DELETE FROM rag_chunks WHERE document_id = ANY(%s)",
+                (list(document_ids),),
+            )

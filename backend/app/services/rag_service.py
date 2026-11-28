@@ -3,22 +3,32 @@ import hashlib
 import re
 from dataclasses import dataclass
 from pathlib import Path
+from uuid import UUID
+from zipfile import BadZipFile
 
 import psycopg
+from docx import Document as WordDocument
+from docx.opc.exceptions import PackageNotFoundError
+from docx.table import Table
+from docx.text.paragraph import Paragraph
+from pypdf import PdfReader
+from pypdf.errors import PdfReadError
 
 from app.core.config import Settings, get_settings
 from app.core.errors import AIUnavailableError
 from app.services.embedding_service import embed_texts
+from app.services.document_storage import resolve_stored_file
 
-CHUNK_SIZE = 1200
-CHUNK_OVERLAP = 180
+CHUNK_SIZE = 600
+CHUNK_OVERLAP = 90
 EMBEDDING_BATCH_SIZE = 16
+MULTILINGUAL_EMBEDDING_MODEL = "nomic-embed-text-v2-moe"
 RERANK_CANDIDATE_MULTIPLIER = 5
 MIN_RERANK_CANDIDATES = 20
 MAX_RERANK_CANDIDATES = 100
 LEXICAL_RERANK_WEIGHT = 0.1
 TITLE_RERANK_WEIGHT = 0.25
-SUPPORTED_SUFFIXES = {".pdf", ".md", ".txt"}
+SUPPORTED_SUFFIXES = {".pdf", ".docx", ".md", ".txt"}
 _RERANK_STOPWORDS = frozenset(
     "a an and are as at au aux avec ce ces dans de des du elle en est et for from "
     "how i il in is it la le les of on or ou par pour que quelle quelles quel quels "
@@ -62,28 +72,102 @@ class DocumentChunk:
     page: int
     chunk_index: int
     content: str
+    document_id: UUID | None = None
+    document_version_id: UUID | None = None
+
+
+class DocumentExtractionError(ValueError):
+    """Raised when a source cannot be fully converted to searchable text."""
 
 
 def chunk_text(text: str, *, size: int = CHUNK_SIZE, overlap: int = CHUNK_OVERLAP) -> list[str]:
     if size <= 0 or overlap < 0 or overlap >= size:
         raise ValueError("Chunk size must be positive and overlap must be smaller than size.")
-    normalized = re.sub(r"\s+", " ", text).strip()
-    if not normalized:
+    if not text.strip():
         return []
 
+    segments = []
+    pending_heading = None
+    paragraphs = re.split(r"\n[ \t]*\n+", text.replace("\r\n", "\n").replace("\r", "\n").strip())
+    for paragraph in paragraphs:
+        lines = paragraph.splitlines()
+        heading = re.fullmatch(r"\s{0,3}#{1,6}\s+.+?\s*", lines[0]) if lines else None
+        if heading:
+            pending_heading = re.sub(r"\s+", " ", lines.pop(0)).strip()
+
+        normalized = re.sub(r"\s+", " ", "\n".join(lines)).strip()
+        if not normalized:
+            continue
+
+        sentences = [
+            sentence.strip()
+            for sentence in re.split(r"(?<=[.!?…])\s+", normalized)
+            if sentence.strip()
+        ]
+        if pending_heading:
+            sentences[0] = f"{pending_heading} — {sentences[0]}"
+            pending_heading = None
+        segments.extend(sentences)
+
+    if pending_heading:
+        segments.append(pending_heading)
+
+    segments = [
+        piece
+        for segment in segments
+        for piece in _split_oversized_segment(segment, size=size, overlap=overlap)
+    ]
+
     chunks = []
+    current = []
+    for segment in segments:
+        if current and len(" ".join([*current, segment])) > size:
+            chunks.append(" ".join(current))
+            carried = []
+            for previous in reversed(current):
+                candidate = " ".join([previous, *carried])
+                if len(candidate) > overlap:
+                    break
+                carried.insert(0, previous)
+            current = carried
+            while current and len(" ".join([*current, segment])) > size:
+                current.pop(0)
+        current.append(segment)
+    if current:
+        chunks.append(" ".join(current))
+    return chunks
+
+
+def _split_oversized_segment(segment: str, *, size: int, overlap: int) -> list[str]:
+    if len(segment) <= size:
+        return [segment]
+
+    pieces = []
     start = 0
-    while start < len(normalized):
-        end = min(start + size, len(normalized))
-        if end < len(normalized):
-            boundary = normalized.rfind(" ", start + size // 2, end)
+    while start < len(segment):
+        end = min(start + size, len(segment))
+        if end < len(segment):
+            boundary = segment.rfind(" ", start + size // 2, end)
             if boundary > start:
                 end = boundary
-        chunks.append(normalized[start:end].strip())
-        if end == len(normalized):
+        pieces.append(segment[start:end].strip())
+        if end == len(segment):
             break
-        start = end - overlap
-    return chunks
+
+        next_start = max(start + 1, end - overlap)
+        boundary = segment.find(" ", next_start, end)
+        if boundary >= 0:
+            next_start = boundary + 1
+        start = next_start
+    return pieces
+
+
+def _embedding_inputs(texts: list[str], *, task: str, settings: Settings) -> list[str]:
+    model_name = settings.rag_embedding_model.split(":", 1)[0].casefold()
+    if model_name == MULTILINGUAL_EMBEDDING_MODEL:
+        prefix = f"search_{task}: "
+        return [f"{prefix}{text}" for text in texts]
+    return texts
 
 
 def _knowledge_base_path(settings: Settings) -> Path:
@@ -95,13 +179,67 @@ def _knowledge_base_path(settings: Settings) -> Path:
 
 def _read_document(path: Path) -> list[tuple[int, str]]:
     if path.suffix.lower() == ".pdf":
-        from pypdf import PdfReader
+        try:
+            pages = list(PdfReader(str(path)).pages)
+            if not pages:
+                raise DocumentExtractionError(f"PDF has no pages: {path.name}")
 
-        reader = PdfReader(str(path))
-        return [
-            (page_number, page.extract_text() or "")
-            for page_number, page in enumerate(reader.pages, start=1)
-        ]
+            extracted = []
+            empty_pages = []
+            for page_number, page in enumerate(pages, start=1):
+                text = page.extract_text() or ""
+                if text.strip():
+                    extracted.append((page_number, text))
+                else:
+                    empty_pages.append(page_number)
+        except DocumentExtractionError:
+            raise
+        except (PdfReadError, OSError, EOFError, ValueError) as exc:
+            raise DocumentExtractionError(
+                f"Unable to read PDF '{path.name}': {exc}"
+            ) from exc
+
+        if empty_pages:
+            pages_text = ", ".join(map(str, empty_pages))
+            raise DocumentExtractionError(
+                f"PDF extraction may be incomplete for '{path.name}': "
+                f"no selectable text on page(s) {pages_text}; pages may be blank or scanned."
+            )
+        return extracted
+
+    if path.suffix.lower() == ".docx":
+        try:
+            document = WordDocument(str(path))
+            blocks = []
+            for item in document.iter_inner_content():
+                if isinstance(item, Paragraph):
+                    text = item.text.strip()
+                    if not text:
+                        continue
+                    style_name = item.style.name.casefold() if item.style else ""
+                    heading = re.fullmatch(r"(?:heading|titre)\s+([1-6])", style_name)
+                    if heading:
+                        text = f"{'#' * int(heading[1])} {text}"
+                    elif style_name in {"title", "titre"}:
+                        text = f"# {text}"
+                    elif style_name in {"subtitle", "sous-titre"}:
+                        text = f"## {text}"
+                    blocks.append(text)
+                elif isinstance(item, Table):
+                    for row in item.rows:
+                        cells = [re.sub(r"\s+", " ", cell.text).strip() for cell in row.cells]
+                        if any(cells):
+                            blocks.append(" | ".join(cells))
+            text = "\n\n".join(blocks)
+        except (BadZipFile, PackageNotFoundError, OSError, KeyError, ValueError) as exc:
+            raise DocumentExtractionError(
+                f"Unable to read DOCX '{path.name}': {exc}"
+            ) from exc
+
+        if not text.strip():
+            raise DocumentExtractionError(f"No extractable text found in DOCX: {path.name}")
+        return [(0, text)]
+
     return [(0, path.read_text(encoding="utf-8"))]
 
 
@@ -114,7 +252,7 @@ def _document_chunks(root: Path) -> list[DocumentChunk]:
     )
     if not files:
         raise FileNotFoundError(
-            f"No PDF, Markdown, or text documents found in the knowledge-base folder: {root}"
+            f"No PDF, DOCX, Markdown, or text documents found in the knowledge-base folder: {root}"
         )
 
     chunks: list[DocumentChunk] = []
@@ -133,8 +271,47 @@ def _document_chunks(root: Path) -> list[DocumentChunk]:
                 for index, content in enumerate(chunk_text(text))
             )
         if not file_chunks:
-            raise ValueError(f"No selectable text could be extracted from document: {path}")
+            raise DocumentExtractionError(
+                f"No selectable text could be extracted from document: {path.name}"
+            )
         chunks.extend(file_chunks)
+    return chunks
+
+
+def _published_document_chunks(settings: Settings) -> list[DocumentChunk]:
+    with psycopg.connect(_database_url(settings)) as connection:
+        rows = connection.execute(
+            """
+            SELECT d.id, d.current_version_id, d.title, v.original_filename, v.storage_path
+            FROM document_source AS d
+            JOIN document_version AS v ON v.id = d.current_version_id
+            WHERE d.status = 'active'
+              AND d.deleted_at IS NULL
+            ORDER BY d.id
+            """
+        ).fetchall()
+
+    chunks: list[DocumentChunk] = []
+    for document_id, version_id, title, filename, storage_path in rows:
+        path = resolve_stored_file(storage_path, settings=settings)
+        document_chunks = [
+            DocumentChunk(
+                source_path=storage_path,
+                title=title,
+                page=page,
+                chunk_index=index,
+                content=content,
+                document_id=document_id,
+                document_version_id=version_id,
+            )
+            for page, text in _read_document(path)
+            for index, content in enumerate(chunk_text(text))
+        ]
+        if not document_chunks:
+            raise DocumentExtractionError(
+                f"No selectable text could be extracted from document: {filename}"
+            )
+        chunks.extend(document_chunks)
     return chunks
 
 
@@ -219,12 +396,20 @@ def _initialize_schema(settings: Settings, embedding_dimensions: int) -> None:
                 content TEXT NOT NULL,
                 embedding_model TEXT NOT NULL,
                 embedding vector({embedding_dimensions}) NOT NULL,
+                document_id UUID,
+                document_version_id UUID,
                 UNIQUE (source_path, page, chunk_index)
             )
             """
         )
         connection.execute(
             "ALTER TABLE rag_chunks ADD COLUMN IF NOT EXISTS embedding_model TEXT"
+        )
+        connection.execute(
+            "ALTER TABLE rag_chunks ADD COLUMN IF NOT EXISTS document_id UUID"
+        )
+        connection.execute(
+            "ALTER TABLE rag_chunks ADD COLUMN IF NOT EXISTS document_version_id UUID"
         )
         embedding_type = connection.execute(
             """
@@ -271,8 +456,9 @@ def _store_document_chunks(
                 cursor.executemany(
                     """
                     INSERT INTO rag_chunks
-                        (source_id, source_path, title, page, chunk_index, content, embedding_model, embedding)
-                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s::vector)
+                        (source_id, source_path, title, page, chunk_index, content, embedding_model,
+                         embedding, document_id, document_version_id)
+                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s::vector, %s, %s)
                     """,
                     [
                         (
@@ -286,6 +472,8 @@ def _store_document_chunks(
                             chunk.content,
                             settings.rag_embedding_model,
                             _vector_literal(embedding),
+                            chunk.document_id,
+                            chunk.document_version_id,
                         )
                         for chunk, embedding in zip(chunks, embeddings, strict=True)
                     ],
@@ -298,6 +486,7 @@ async def ingest_documents(*, settings: Settings | None = None) -> int:
     if not root.is_dir():
         raise FileNotFoundError(f"Knowledge-base folder does not exist: {root}")
     chunks = _document_chunks(root)
+    chunks.extend(await asyncio.to_thread(_published_document_chunks, config))
 
     grouped: dict[str, list[DocumentChunk]] = {}
     for chunk in chunks:
@@ -310,7 +499,11 @@ async def ingest_documents(*, settings: Settings | None = None) -> int:
         for start in range(0, len(document_chunks), EMBEDDING_BATCH_SIZE):
             batch = document_chunks[start:start + EMBEDDING_BATCH_SIZE]
             embeddings = await embed_texts(
-                [chunk.content for chunk in batch],
+                _embedding_inputs(
+                    [chunk.content for chunk in batch],
+                    task="document",
+                    settings=config,
+                ),
                 settings=config,
             )
             if len(embeddings) != len(batch):
@@ -351,12 +544,26 @@ def _search(
     with psycopg.connect(_database_url(settings)) as connection:
         rows = connection.execute(
             """
-            SELECT source_id, title, source_path, page, content,
-                   1 - (embedding <=> %s::vector) AS similarity
-            FROM rag_chunks
-            WHERE embedding_model = %s
-              AND 1 - (embedding <=> %s::vector) >= %s
-            ORDER BY embedding <=> %s::vector
+            SELECT chunk.source_id, chunk.title,
+                   COALESCE(version.original_filename, chunk.source_path) AS origin,
+                   chunk.page, chunk.content,
+                   1 - (chunk.embedding <=> %s::vector) AS similarity
+            FROM rag_chunks AS chunk
+            LEFT JOIN document_version AS version ON version.id = chunk.document_version_id
+            WHERE chunk.embedding_model = %s
+              AND (
+                  chunk.document_id IS NULL
+                  OR EXISTS (
+                      SELECT 1
+                      FROM document_source AS document
+                      WHERE document.id = chunk.document_id
+                        AND document.status = 'active'
+                        AND document.deleted_at IS NULL
+                        AND document.current_version_id = chunk.document_version_id
+                  )
+              )
+              AND 1 - (chunk.embedding <=> %s::vector) >= %s
+            ORDER BY chunk.embedding <=> %s::vector
             LIMIT %s
             """,
             (
@@ -388,7 +595,10 @@ async def retrieve(
     settings: Settings | None = None,
 ) -> list[RetrievedChunk]:
     config = settings or get_settings()
-    embeddings = await embed_texts([query], settings=config)
+    embeddings = await embed_texts(
+        _embedding_inputs([query], task="query", settings=config),
+        settings=config,
+    )
     try:
         return await asyncio.to_thread(
             _search,

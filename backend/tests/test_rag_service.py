@@ -2,6 +2,9 @@ import asyncio
 from contextlib import nullcontext
 from unittest.mock import MagicMock
 
+import pytest
+from docx import Document as WordDocument
+
 from app.core.config import Settings
 from app.services import rag_service
 
@@ -13,6 +16,33 @@ def test_chunk_text_produces_overlapping_bounded_chunks():
     assert all(len(chunk) <= 1200 for chunk in chunks)
     assert chunks[0][-180:] == chunks[1][:180]
     assert chunks[1][-180:] == chunks[2][:180]
+
+
+def test_chunk_text_keeps_sentences_and_markdown_headings_together():
+    text = (
+        "## Admission\n"
+        "Les candidatures sont ouvertes. Les dossiers complets sont obligatoires.\n\n"
+        "## Frais\n"
+        "Les montants annuels sont publiés. Le paiement se fait en deux étapes."
+    )
+
+    chunks = rag_service.chunk_text(text, size=70, overlap=0)
+
+    assert chunks[0] == "## Admission — Les candidatures sont ouvertes."
+    assert any("Les dossiers complets sont obligatoires." in chunk for chunk in chunks)
+    assert any(chunk.startswith("## Frais — ") for chunk in chunks)
+    assert all(len(chunk) <= 70 for chunk in chunks)
+
+
+def test_multilingual_embedding_model_uses_task_prefixes():
+    settings = Settings(rag_embedding_model="nomic-embed-text-v2-moe:latest")
+
+    assert rag_service._embedding_inputs(
+        ["un document"], task="document", settings=settings
+    ) == ["search_document: un document"]
+    assert rag_service._embedding_inputs(
+        ["une question"], task="query", settings=settings
+    ) == ["search_query: une question"]
 
 
 def test_rerank_promotes_exact_curriculum_match_over_similar_admission_docs():
@@ -86,6 +116,62 @@ def test_document_loader_skips_its_instructions_file(tmp_path):
     assert chunks[0].content == "Official school content."
 
 
+def test_docx_extraction_preserves_headings_paragraphs_and_tables(tmp_path):
+    document = WordDocument()
+    document.add_heading("Conditions d'admission", level=1)
+    document.add_paragraph("Le dossier doit être complet.")
+    table = document.add_table(rows=1, cols=2)
+    table.cell(0, 0).text = "Date limite"
+    table.cell(0, 1).text = "30 juin"
+    path = tmp_path / "guide.docx"
+    document.save(path)
+
+    chunks = rag_service._document_chunks(tmp_path)
+
+    assert len(chunks) == 1
+    assert chunks[0].page == 0
+    assert "# Conditions d'admission — Le dossier doit être complet." in chunks[0].content
+    assert "Date limite | 30 juin" in chunks[0].content
+
+
+def test_pdf_extraction_reports_pages_without_selectable_text(monkeypatch, tmp_path):
+    class FakePage:
+        def __init__(self, text):
+            self.text = text
+
+        def extract_text(self):
+            return self.text
+
+    class FakeReader:
+        pages = [FakePage("Page lisible."), FakePage("")]
+
+        def __init__(self, _path):
+            pass
+
+    monkeypatch.setattr(rag_service, "PdfReader", FakeReader)
+
+    with pytest.raises(rag_service.DocumentExtractionError, match=r"page\(s\) 2"):
+        rag_service._read_document(tmp_path / "partiel.pdf")
+
+
+def test_unreadable_pdf_reports_the_source_filename(monkeypatch, tmp_path):
+    def unreadable_reader(_path):
+        raise OSError("invalid file")
+
+    monkeypatch.setattr(rag_service, "PdfReader", unreadable_reader)
+
+    with pytest.raises(rag_service.DocumentExtractionError, match="broken.pdf"):
+        rag_service._read_document(tmp_path / "broken.pdf")
+
+
+def test_unreadable_docx_reports_the_source_filename(tmp_path):
+    path = tmp_path / "broken.docx"
+    path.write_bytes(b"not a DOCX package")
+
+    with pytest.raises(rag_service.DocumentExtractionError, match="broken.docx"):
+        rag_service._read_document(path)
+
+
 def test_ingestion_stores_all_chunks_for_a_document_in_one_replace(monkeypatch, tmp_path):
     (tmp_path / "guide.txt").write_text("A" * 25_000, encoding="utf-8")
     stores = []
@@ -104,6 +190,7 @@ def test_ingestion_stores_all_chunks_for_a_document_in_one_replace(monkeypatch, 
     )
     monkeypatch.setattr(rag_service, "_store_document_chunks", fake_store)
     monkeypatch.setattr(rag_service, "embed_texts", fake_embed_texts)
+    monkeypatch.setattr(rag_service, "_published_document_chunks", lambda _settings: [])
 
     count = asyncio.run(rag_service.ingest_documents(
         settings=Settings(rag_documents_dir=str(tmp_path))
